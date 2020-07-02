@@ -4,9 +4,6 @@ import os
 import sys
 
 import yaml
-curPath = os.path.abspath(os.path.dirname(__file__))
-rootPath = os.path.split(curPath)[0]
-sys.path.append(os.path.split(rootPath)[0])
 from models.experimental import *
 
 
@@ -41,6 +38,7 @@ class Detect(nn.Module):
                 y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
                 z.append(y.view(bs, -1, self.no))
 
+        print ('z is %v', z)
         return x if self.training else (torch.cat(z, 1), x)
 
     @staticmethod
@@ -50,7 +48,7 @@ class Detect(nn.Module):
 
 
 class Model(nn.Module):
-    def __init__(self, model_cfg='yolov5s.yaml', ch=3, nc=None):  # model, input channels, number of classes
+    def __init__(self, model_cfg='yolov5s.yaml', ch=64, nc=None):  # model, input channels, number of classes
         super(Model, self).__init__()
         if type(model_cfg) is dict:
             self.md = model_cfg  # model dict
@@ -65,18 +63,20 @@ class Model(nn.Module):
         # print([x.shape for x in self.forward(torch.zeros(1, ch, 64, 64))])
 
         # Build strides, anchors
-        if self.model[-1] != None:
+        if self.model[-1] == None:
             m = self.model[-1]  # Detect()
-            m.stride = torch.tensor([64 / x.shape[-2] for x in self.forward(torch.zeros(1, ch, 64, 64))])  # forward
+            tx = self.forward(torch.zeros(1,ch,64,64))
+            #print ('testing tx is ', tx)
+            m.stride = torch.tensor([64 / x.shape[-2] for x in tx])  # forward
             m.anchors /= m.stride.view(-1, 1, 1)
             self.stride = m.stride
 
         # Init weights, biases
         torch_utils.initialize_weights(self)
-        self._initialize_biases()  # only run once
+        #self._initialize_biases()  # only run once
         torch_utils.model_info(self, True)
-        self.model.load_state_dict("/home/edge/peiqi/distYolov5/weit.pt")
-        torch.save(self.model, "/home/edge/peiqi/wei2.pt")
+        #self.model.load_state_dict("/home/edge/peiqi/distYolov5/weit.pt")
+        torch.save(self.model, "/home/edge/peiqi/distYolov5/models/wei2.pt")
 
     def forward(self, x, augment=False, profile=False):
         if augment:
@@ -97,26 +97,16 @@ class Model(nn.Module):
         else:
             return self.forward_once(x, profile)  # single-scale inference, train
 
-    def forward_once(self, x, profile=False):
+    def forward_once(self, x, profile=True):
         y, dt = [], []  # outputs
         for m in self.model:
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
 
-            if profile:
-                import thop
-                o = thop.profile(m, inputs=(x,), verbose=False)[0] / 1E9 * 2  # FLOPS
-                t = torch_utils.time_synchronized()
-                for _ in range(10):
-                    _ = m(x)
-                dt.append((torch_utils.time_synchronized() - t) * 100)
-                print('%10.1f%10.0f%10.1fms %-40s' % (o, m.np, dt[-1], m.type))
-
             x = m(x)  # run
             y.append(x if m.i in self.save else None)  # save output
 
-        if profile:
-            print('%.1fms total' % sum(dt))
+        #print ('y and dt are', (y, dt))
         return x
 
     def _initialize_biases(self, cf=None):  # initialize biases into Detect(), cf is class frequency
@@ -127,7 +117,7 @@ class Model(nn.Module):
             b = mi.bias.view(m.na, -1)  # conv.bias(255) to (3,85)
             b[:, 4] += math.log(8 / (640 / s) ** 2)  # obj (8 objects per 640 image)
             b[:, 5:] += math.log(0.6 / (m.nc - 0.99)) if cf is None else torch.log(cf / cf.sum())  # cls
-            mi.bias = torch.nn.Parameter(b.view(-1), requires_grad=True)
+            mi.bias = torch.nn.Parameter(b.view(-1), requires_grad=False)
 
     def _print_biases(self):
         m = self.model[-1]  # Detect() module
@@ -151,7 +141,7 @@ class Model(nn.Module):
 
 
 def parse_model(md, ch):  # model_dict, input_channels(3)
-    print('\n%3s%15s%3s%10s  %-40s%-30s' % ('', 'from', 'n', 'params', 'module', 'arguments'))
+    #print('\n%3s%15s%3s%10s  %-40s%-30s' % ('', 'from', 'n', 'params', 'module', 'arguments'))
     anchors, nc, gd, gw = md['anchors'], md['nc'], md['depth_multiple'], md['width_multiple']
     na = (len(anchors[0]) // 2)  # number of anchors
     no = na * (nc + 5)  # number of outputs = anchors * (classes + 5)
@@ -186,7 +176,6 @@ def parse_model(md, ch):  # model_dict, input_channels(3)
             # if m != Focus:
             #     c2 = make_divisible(c2, 8) if c2 != no else c2
 
-            #by peiqi args = [c1, c2, *args[1:]]
             args = [c1, c2, *args[1:]]
             if m is BottleneckCSP:
                 args.insert(2, n)
@@ -201,6 +190,7 @@ def parse_model(md, ch):  # model_dict, input_channels(3)
             c2 = ch[f]
 
         m_ = nn.Sequential(*[m(*args) for _ in range(n)]) if n > 1 else m(*args)  # module
+        #print ('__main__ is ', str(m)[8:-2].replace('__main__.', ''))
         t = str(m)[8:-2].replace('__main__.', '')  # module type
         np = sum([x.numel() for x in m_.parameters()])  # number params
         m_.i, m_.f, m_.type, m_.np = i, f, t, np  # attach index, 'from' index, type, number params
@@ -208,12 +198,13 @@ def parse_model(md, ch):  # model_dict, input_channels(3)
         save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
         layers.append(m_)
         ch.append(c2)
+        #print ('save is ', save)
     return nn.Sequential(*layers), sorted(save)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cfg', type=str, default='yolov5s2.yaml', help='model.yaml')
+    parser.add_argument('--cfg', type=str, default='yolo5s2.yaml', help='model.yaml')
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     opt = parser.parse_args()
     opt.cfg = glob.glob('./**/' + opt.cfg, recursive=True)[0]  # find file
