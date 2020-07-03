@@ -2,9 +2,16 @@
 import argparse
 import os
 import sys
+import socket
+import pickle
+import struct
 
 import yaml
+import numpy
+import torch
 from models.experimental import *
+from torch.autograd import Variable
+
 
 
 class Detect(nn.Module):
@@ -139,6 +146,38 @@ class Model(nn.Module):
                 m.forward = m.fuseforward  # update forward
         torch_utils.model_info(self)
 
+    def connect(self, message):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        #Connect to remote server
+        s.connect((host , port))
+        try :
+            #Set the whole string
+            s.sendall(message)
+        except socket.error:
+            #Send failed
+            print 'Send failed'
+            sys.exit()
+
+        print 'cnnArgs send successfully'
+        #Now receive data
+        reply = s.recv(4096)
+        print reply
+
+    def send_numpy_array(self, np_array):
+        """
+        :param np_array: Numpy array to send to the listening socket
+        :type np_array: ndarray
+        :return: None
+        :rtype: None
+        """
+        data = pickle.dumps(np_array)
+
+        # Send message length first
+        message_size = struct.pack("L", len(data))  ### CHANGED
+
+        # Then data
+        self.socket.sendall(message_size + data)
+
 
 def parse_model(md, ch):  # model_dict, input_channels(3)
     #print('\n%3s%15s%3s%10s  %-40s%-30s' % ('', 'from', 'n', 'params', 'module', 'arguments'))
@@ -211,6 +250,22 @@ if __name__ == '__main__':
 
     # Create model
     model = Model(opt.cfg).to(device)
+
+    ##FIXME ME Peiqi, input should be image or camera video
+    input = Variable(torch.zeros(512, 3, 9, 11))
+    print(model)
+    if torch.cuda.is_available():
+        r = model.cuda()(input.cuda())
+        np_array = r.detach().cpu().numpy()
+    else:
+        r = model(input.cpu())
+        np_array = r.detach().numpy()
+
+    print('original: ', r)
+    data = pickle.dumps(np_array)
+    # Send message length first
+    message_size = struct.pack("L", len(data))  ### CHANGED
+    model.connect(message_size+data)
     #print (model.state_dict())
     #model.train()
 

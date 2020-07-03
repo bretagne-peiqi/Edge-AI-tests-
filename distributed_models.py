@@ -86,7 +86,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', type=str, nargs='+', action='append', default='weights/yolov5s.pt', help='pretrained model weights path')
     parser.add_argument('--models', type=str, nargs='+', action='append', default='models/wei2.pt', help='segmented model slices path')
-    parser.add_argument('--savePath', type=str, default='models/gwei2.pt', help='path to output segmented model slices')
+    parser.add_argument('--savePath', type=str, default='weights/gwei2.pt', help='path to output segmented model slices')
     parser.add_argument('--splitN', default=3, help='split model segmentation from number N')
     opt = parser.parse_args()
 

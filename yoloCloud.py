@@ -1,11 +1,18 @@
 # -*- coding: utf-8 -*-
 import argparse
 import os
+import socket
 import sys
+import pickle
+import struct
 
 import yaml
 from models.experimental import *
+import numpy as np
+import torch
 
+HOST = ''       # Symbolic name, meaning all available interfaces
+PORT = 8888     # Arbitrary non-privileged port
 
 class Detect(nn.Module):
     def __init__(self, nc=80, anchors=()):  # detection layer
@@ -139,6 +146,41 @@ class Model(nn.Module):
                 m.forward = m.fuseforward  # update forward
         torch_utils.model_info(self)
 
+   def connect(self):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            s.bind((HOST, PORT))
+        except socket.error as msg:
+            print 'Bind failed. Error Code : ' + str(msg[0]) + ' Message ' + msg[1]
+            sys.exit()
+
+        #Start listening on socket
+        s.listen(10)
+        print 'Socket now listening'
+
+        conn, addr = s.accept()
+        self.payload_size = struct.calcsize("L")  ### CHANGED
+        self.data =b''
+
+        while len(self.data) < self.payload_size:
+            self.data += conn.recv(4096)
+
+        packed_msg_size = self.data[:self.payload_size]
+        self.data = self.data[self.payload_size:]
+        msg_size = struct.unpack("L", packed_msg_size)[0]
+
+        # Retrieve all data based on message size
+        while len(self.data) < msg_size:
+            self.data += conn.recv(4096)
+
+        frame_data = self.data[:msg_size]
+        self.data = self.data[msg_size:]
+
+        # Extract frame
+        frame = pickle.loads(frame_data)
+        return frame
+
+
 
 def parse_model(md, ch):  # model_dict, input_channels(3)
     #print('\n%3s%15s%3s%10s  %-40s%-30s' % ('', 'from', 'n', 'params', 'module', 'arguments'))
@@ -211,7 +253,17 @@ if __name__ == '__main__':
 
     # Create model
     model = Model(opt.cfg).to(device)
-    #print (model.state_dict())
+
+    cnnArgs = model.connect()
+    tensor = torch.from_numpy(cnnArgs)
+    print 'tensor: ', tensor
+    if torch.cuda.is_available():
+        result = model.cuda()(tensor.cuda())
+    else:
+        result = model(tensor.cpu())
+
+    print 'final: ', result
+
     #model.train()
 
     # Profile
