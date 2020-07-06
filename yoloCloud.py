@@ -53,7 +53,6 @@ class Detect(nn.Module):
         yv, xv = torch.meshgrid([torch.arange(ny), torch.arange(nx)])
         return torch.stack((xv, yv), 2).view((1, 1, ny, nx, 2)).float()
 
-
 class Model(nn.Module):
     def __init__(self, model_cfg='yolov5s.yaml', ch=64, nc=None):  # model, input channels, number of classes
         super(Model, self).__init__()
@@ -82,7 +81,12 @@ class Model(nn.Module):
         torch_utils.initialize_weights(self)
         self._initialize_biases()  # only run once
         torch_utils.model_info(self, True)
-        #self.model.load_state_dict("/home/edge/peiqi/distYolov5/weit.pt")
+
+        new_weights_dict = co.OrderedDict()
+        splitN = opt.splitN
+        Weights = opt.weights
+        ckpt = torch.load(Weights)
+
 
         try:
             weights = {k: v for k, v in ckpt['model'].float().state_dict().items()
@@ -98,7 +102,7 @@ class Model(nn.Module):
 
             print ('before model is ', weights.values())
             #print ('before model is ', model.state_dict().values())
-            model.load_state_dict(new_weights_dict, strict=True)
+            self.model.load_state_dict(new_weights_dict, strict=True)
             #print ('after model is ', model.state_dict().values())
             #savePath = opt.savePath+i+'.pt'
             #torch.save(model, savePath)
@@ -268,7 +272,7 @@ def parse_model(md, ch):  # model_dict, input_channels(3)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', type=str, default='weights/wei2.pt', help='cloud weights.pt')
+    parser.add_argument('--weights', type=str, default='weights/yolov5s.pt', help='cloud weights.pt')
     parser.add_argument('--cfg', type=str, default='yolo5s2.yaml', help='model.yaml')
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--source', type=str, default='inference/images', help='source')  # file/folder, 0 for webcam

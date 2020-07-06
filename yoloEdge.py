@@ -83,14 +83,14 @@ class Model(nn.Module):
         self._initialize_biases()  # only run once
         torch_utils.model_info(self, True)
 
+        new_weights_dict = co.OrderedDict()
+        splitN = opt.splitN
+        Weights = opt.weights
+        ckpt = torch.load(Weights)
+
         try:
             weights = {k: v for k, v in ckpt['model'].float().state_dict().items()
                      if int(k.split('.')[1]) < splitN }
-
-        #model.state_dict().update(weights)
-        #for k, v in weights.items():
-        #   name = k[6:]
-        #   new_weights_dict[name] = v
 
             for k, v in zip(model.state_dict().keys(), weights.values()):
                 new_weights_dict[k] = v
@@ -326,8 +326,8 @@ def detect(save_img=False):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cfg', type=str, default='yolo5s1.yaml', help='model.yaml')
     parser.add_argument('--weights', type=str, default='weights/yolov5s.pt', help='model.pt path')
+    parser.add_argument('--cfg', type=str, default='yolo5s1.yaml', help='model.yaml')
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--source', type=str, default='inference/images', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--output', type=str, default='inference/output', help='output folder')  # output folder
