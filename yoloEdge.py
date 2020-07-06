@@ -259,7 +259,7 @@ def detect(save_img=False):
 
     # Load model
     #google_utils.attempt_download(weights)
-    model = torch.load(weights, map_location=device)['model'].float()  # load to FP32
+    model = torch.load(weights, map_location=device).float()  # load to FP32
     #model = torch.load(weights, map_location=device)['model'].float()  # load to FP32
     # torch.save(torch.load(weights, map_location=device), weights)  # update model if SourceChangeWarning
     # model.fuse()
@@ -304,7 +304,7 @@ def detect(save_img=False):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', type=str, default='weights/yolov5s.pt', help='model.pt path')
+    parser.add_argument('--weights', type=str, default='weights/gwei1.pt', help='model.pt path')
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--source', type=str, default='inference/images', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--output', type=str, default='inference/output', help='output folder')  # output folder
