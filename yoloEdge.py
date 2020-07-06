@@ -82,8 +82,30 @@ class Model(nn.Module):
         torch_utils.initialize_weights(self)
         self._initialize_biases()  # only run once
         torch_utils.model_info(self, True)
+
+        try:
+            weights = {k: v for k, v in ckpt['model'].float().state_dict().items()
+                     if int(k.split('.')[1]) < splitN }
+
+        #model.state_dict().update(weights)
+        #for k, v in weights.items():
+        #   name = k[6:]
+        #   new_weights_dict[name] = v
+
+            for k, v in zip(model.state_dict().keys(), weights.values()):
+                new_weights_dict[k] = v
+
+            print ('before model is ', weights.values())
+            #print ('before model is ', model.state_dict().values())
+            model.load_state_dict(new_weights_dict, strict=True)
+            #print ('after model is ', model.state_dict().values())
+            #torch.save(model, savePath)
+        except KeyError as e:
+            s = "%s is not compatible with %s. Specify --weights '' or specify a --cfg compatible with %s." \
+                 % (opt.models, opt.weights)
+            raise KeyError(s) from e
+
         #self.model.load_state_dict("/home/edge/peiqi/distYolov5/weit.pt")
-        torch.save(self.model, "/home/edge/peiqi/distYolov5/models/wei2.pt")
 
     def forward(self, x, augment=False, profile=False):
         if augment:
@@ -304,7 +326,8 @@ def detect(save_img=False):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', type=str, default='weights/gwei1.pt', help='model.pt path')
+    parser.add_argument('--cfg', type=str, default='yolo5s1.yaml', help='model.yaml')
+    parser.add_argument('--weights', type=str, default='weights/yolov5s.pt', help='model.pt path')
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--source', type=str, default='inference/images', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--output', type=str, default='inference/output', help='output folder')  # output folder
@@ -317,6 +340,7 @@ if __name__ == '__main__':
     parser.add_argument('--classes', nargs='+', type=int, help='filter by class')
     parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
     parser.add_argument('--augment', action='store_true', help='augmented inference')
+    parser.add_argument('--splitN', default=3, help='split model segmentation from number N')
     opt = parser.parse_args()
     opt.img_size = check_img_size(opt.img_size)
 
