@@ -114,6 +114,12 @@ class Model(nn.Module):
             y.append(x if m.i in self.save else None)  # save output
 
         #print ('y and dt are', (y, dt))
+        np_array = x.detach().numpy()
+        data = pickle.dumps(np_array)
+        # Send message length first
+        message_size = struct.pack("L", len(data))  ### CHANGED
+        self.connect(message_size+data)
+
         return x
 
     def _initialize_biases(self, cf=None):  # initialize biases into Detect(), cf is class frequency
@@ -158,7 +164,7 @@ class Model(nn.Module):
             print 'Send failed'
             sys.exit()
 
-        print 'cnnArgs send successfully'
+        print 'cnnParas send successfully'
         #Now receive data
         reply = s.recv(4096)
         print reply
@@ -239,37 +245,98 @@ def parse_model(md, ch):  # model_dict, input_channels(3)
         ch.append(c2)
     return nn.Sequential(*layers), sorted(save)
 
+def detect(save_img=False):
+    out, source, weights, view_img, save_txt, imgsz = \
+        opt.output, opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size
+    webcam = source == '0' or source.startswith('rtsp') or source.startswith('http') or source.endswith('.txt')
+
+    # Initialize
+    device = torch_utils.select_device(opt.device)
+    if os.path.exists(out):
+        shutil.rmtree(out)  # delete output folder
+    os.makedirs(out)  # make new output folder
+    half = device.type != 'cpu'  # half precision only supported on CUDA
+
+    # Load model
+    #google_utils.attempt_download(weights)
+    model = torch.load(weights, map_location=device)['model'].float()  # load to FP32
+    #model = torch.load(weights, map_location=device)['model'].float()  # load to FP32
+    # torch.save(torch.load(weights, map_location=device), weights)  # update model if SourceChangeWarning
+    # model.fuse()
+    model.to(device).eval()
+    if half:
+        model.half()  # to FP16
+
+    # Set Dataloader
+    vid_path, vid_writer = None, None
+    if webcam:
+        view_img = True
+        torch.backends.cudnn.benchmark = True  # set True to speed up constant image size inference
+        dataset = LoadStreams(source, img_size=imgsz)
+    else:
+        save_img = True
+        dataset = LoadImages(source, img_size=imgsz)
+
+    names = model.names if hasattr(model, 'names') else model.modules.names
+    colors = [[random.randint(0, 255) for _ in range(3)] for _ in range(len(names))]
+
+    # Run inference
+    t0 = time.time()
+    img = torch.zeros((1, 3, imgsz, imgsz), device=device)  # init img
+    _ = model(img.half() if half else img) if device.type != 'cpu' else None  # run once
+    for path, img, im0s, vid_cap in dataset:
+        img = torch.from_numpy(img).to(device)
+        img = img.half() if half else img.float()  # uint8 to fp16/32
+        img /= 255.0  # 0 - 255 to 0.0 - 1.0
+        if img.ndimension() == 3:
+            img = img.unsqueeze(0)
+
+        # Inference
+        t1 = torch_utils.time_synchronized()
+        
+        _ = model(img, augment=opt.augment)[0]
+
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cfg', type=str, default='yolo5s2.yaml', help='model.yaml')
+    parser.add_argument('--weights', type=str, default='weights/yolov5s.pt', help='model.pt path')
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    parser.add_argument('--source', type=str, default='inference/images', help='source')  # file/folder, 0 for webcam
+    parser.add_argument('--output', type=str, default='inference/output', help='output folder')  # output folder
+    parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
+    parser.add_argument('--conf-thres', type=float, default=0.4, help='object confidence threshold')
+    parser.add_argument('--iou-thres', type=float, default=0.5, help='IOU threshold for NMS')
+    parser.add_argument('--fourcc', type=str, default='mp4v', help='output video codec (verify ffmpeg support)')
+    parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    parser.add_argument('--view-img', action='store_true', help='display results')
+    parser.add_argument('--save-txt', action='store_true', help='save results to *.txt')
+    parser.add_argument('--classes', nargs='+', type=int, help='filter by class')
+    parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
+    parser.add_argument('--augment', action='store_true', help='augmented inference')
     opt = parser.parse_args()
-    opt.cfg = glob.glob('./**/' + opt.cfg, recursive=True)[0]  # find file
-    device = torch_utils.select_device(opt.device)
+    opt.img_size = check_img_size(opt.img_size)
 
-    # Create model
-    model = Model(opt.cfg).to(device)
+    with torch.no_grad():
+        detect()
 
-    ##FIXME ME Peiqi, input should be image or camera video
-    input = Variable(torch.zeros(512, 3, 9, 11))
-    print(model)
-    if torch.cuda.is_available():
-        r = model.cuda()(input.cuda())
-        np_array = r.detach().cpu().numpy()
-    else:
-        r = model(input.cpu())
-        np_array = r.detach().numpy()
+        device = torch_utils.select_device(opt.device)
+        if torch.cuda.is_available():
+            r = model.cuda()(input.cuda())
+            np_array = r.detach().cpu().numpy()
+        else:
+            r = model(input.cpu())
+            np_array = r.detach().numpy()
 
-    print('original: ', r)
-    data = pickle.dumps(np_array)
-    # Send message length first
-    message_size = struct.pack("L", len(data))  ### CHANGED
-    model.connect(message_size+data)
-    #print (model.state_dict())
-    #model.train()
+        print('original: ', r)
 
-    # Profile
+        data = pickle.dumps(np_array)
+        # Send message length first
+        message_size = struct.pack("L", len(data))  ### CHANGED
+        model.connect(message_size+data)
+
+
+        # Profile
     # img = torch.rand(8 if torch.cuda.is_available() else 1, 3, 640, 640).to(device)
     # y = model(img, profile=True)
     # print([y[0].shape] + [x.shape for x in y[1]])

@@ -81,7 +81,6 @@ def ModelSplit():
             % (opt.models, opt.weights)
         raise KeyError(s) from e
 
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', type=str, nargs='+', action='append', default='weights/yolov5s.pt', help='pretrained model weights path')

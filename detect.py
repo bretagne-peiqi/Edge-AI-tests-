@@ -3,6 +3,45 @@ import argparse
 from utils.datasets import *
 from utils.utils import *
 
+class Detect(nn.Module):
+    def __init__(self, nc=80, anchors=()):  # detection layer
+        super(Detect, self).__init__()
+        self.stride = None  # strides computed during build
+        self.nc = nc  # number of classes
+        self.no = nc + 5  # number of outputs per anchor
+        self.nl = len(anchors)  # number of detection layers
+        self.na = len(anchors[0]) // 2  # number of anchors
+        self.grid = [torch.zeros(1)] * self.nl  # init grid
+        a = torch.tensor(anchors).float().view(self.nl, -1, 2)
+        self.register_buffer('anchors', a)  # shape(nl,na,2)
+        self.register_buffer('anchor_grid', a.clone().view(self.nl, 1, -1, 1, 1, 2))  # shape(nl,1,na,1,1,2)
+        self.export = False  # onnx export
+
+    def forward(self, x):
+        # x = x.copy()  # for profiling
+        z = []  # inference output
+        self.training |= self.export
+        for i in range(self.nl):
+            bs, _, ny, nx = x[i].shape  # x(bs,255,20,20) to x(bs,3,20,20,85)
+            x[i] = x[i].view(bs, self.na, self.no, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
+
+            if not self.training:  # inference
+                if self.grid[i].shape[2:4] != x[i].shape[2:4]:
+                    self.grid[i] = self._make_grid(nx, ny).to(x[i].device)
+
+                y = x[i].sigmoid()
+                y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i].to(x[i].device)) * self.stride[i]  # xy
+                y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
+                z.append(y.view(bs, -1, self.no))
+
+        print ('z is %v', z)
+        return x if self.training else (torch.cat(z, 1), x)
+
+    @staticmethod
+    def _make_grid(nx=20, ny=20):
+        yv, xv = torch.meshgrid([torch.arange(ny), torch.arange(nx)])
+        return torch.stack((xv, yv), 2).view((1, 1, ny, nx, 2)).float()
+
 
 def detect(save_img=False):
     out, source, weights, view_img, save_txt, imgsz = \
@@ -17,8 +56,9 @@ def detect(save_img=False):
     half = device.type != 'cpu'  # half precision only supported on CUDA
 
     # Load model
-    google_utils.attempt_download(weights)
+    #google_utils.attempt_download(weights)
     model = torch.load(weights, map_location=device)['model'].float()  # load to FP32
+    #model = torch.load(weights, map_location=device)['model'].float()  # load to FP32
     # torch.save(torch.load(weights, map_location=device), weights)  # update model if SourceChangeWarning
     # model.fuse()
     model.to(device).eval()
@@ -43,6 +83,10 @@ def detect(save_img=False):
         dataset = LoadImages(source, img_size=imgsz)
 
     # Get names and colors
+    print(dir(model))
+    print(type(model))
+    print(model.names)
+    #print(model.modules.names)
     names = model.names if hasattr(model, 'names') else model.modules.names
     colors = [[random.randint(0, 255) for _ in range(3)] for _ in range(len(names))]
 
@@ -60,6 +104,9 @@ def detect(save_img=False):
         # Inference
         t1 = torch_utils.time_synchronized()
         pred = model(img, augment=opt.augment)[0]
+
+        print (type(pred))
+        #print (pred)
 
         # Apply NMS
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres,

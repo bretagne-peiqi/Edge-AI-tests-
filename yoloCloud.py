@@ -83,7 +83,7 @@ class Model(nn.Module):
         self._initialize_biases()  # only run once
         torch_utils.model_info(self, True)
         #self.model.load_state_dict("/home/edge/peiqi/distYolov5/weit.pt")
-        torch.save(self.model, "/home/edge/peiqi/distYolov5/models/wei2.pt")
+        #torch.save(self.model, "/home/edge/peiqi/distYolov5/models/wei2.pt")
 
     def forward(self, x, augment=False, profile=False):
         if augment:
@@ -146,7 +146,7 @@ class Model(nn.Module):
                 m.forward = m.fuseforward  # update forward
         torch_utils.model_info(self)
 
-   def connect(self):
+   def connect(self ):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             s.bind((HOST, PORT))
@@ -245,26 +245,82 @@ def parse_model(md, ch):  # model_dict, input_channels(3)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cfg', type=str, default='yolo5s2.yaml', help='model.yaml')
+    parser.add_argument('--weights', type=str, default='weights/gwei2.pt', help='cloud weights.pt')
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     opt = parser.parse_args()
     opt.cfg = glob.glob('./**/' + opt.cfg, recursive=True)[0]  # find file
     device = torch_utils.select_device(opt.device)
 
     # Create model
-    model = Model(opt.cfg).to(device)
+    model = torch.load(weights, map_location=device)['model'].float()
+    cnnparas = model.connect()
+    img = torch.from_numpy(cnnparas)
 
-    cnnArgs = model.connect()
-    tensor = torch.from_numpy(cnnArgs)
-    print 'tensor: ', tensor
-    if torch.cuda.is_available():
-        result = model.cuda()(tensor.cuda())
-    else:
-        result = model(tensor.cpu())
+    pred = model(img, augment=opt.augment)[0]
+    # Apply Classifier
+    if classify:
+        pred = apply_classifier(pred, modelc, img, im0s)
 
-    print 'final: ', result
+    # Process detections
+    for i, det in enumerate(pred):  # detections per image
+        if webcam:  # batch_size >= 1
+            p, s, im0 = path[i], '%g: ' % i, im0s[i].copy()
+        else:
+            p, s, im0 = path, '', im0s
 
-    #model.train()
+        save_path = str(Path(out) / Path(p).name)
+        s += '%gx%g ' % img.shape[2:]  # print string
+        gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  #  normalization gain whwh
+        if det is not None and len(det):
+            # Rescale boxes from img_size to im0 size
+            det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
+
+            # Print results
+            for c in det[:, -1].unique():
+                n = (det[:, -1] == c).sum()  # detections per class
+                s += '%g %ss, ' % (n, names[int(c)])  # add to string
+
+            # Write results
+            for *xyxy, conf, cls in det:
+                if save_txt:  # Write to file
+                    xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+                    with open(save_path[:save_path.rfind('.')] + '.txt', 'a') as file:
+                        file.write(('%g ' * 5 + '\n') % (cls, *xywh))  # label format
+
+                if save_img or view_img:  # Add bbox to image
+                    label = '%s %.2f' % (names[int(cls)], conf)
+                # Print time (inference + NMS)
+            print('%sDone. (%.3fs)' % (s, t2 - t1))
+
+            # Stream results
+            if view_img:
+                cv2.imshow(p, im0)
+                if cv2.waitKey(1) == ord('q'):  # q to quit
+                    raise StopIteration
+
+            # Save results (image with detections)
+            if save_img:
+                if dataset.mode == 'images':
+                    cv2.imwrite(save_path, im0)
+                else:
+                    if vid_path != save_path:  # new video
+                        vid_path = save_path
+                        if isinstance(vid_writer, cv2.VideoWriter):
+                            vid_writer.release()  # release previous video writer
+
+                        fps = vid_cap.get(cv2.CAP_PROP_FPS)
+                        w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                        h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                        vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*opt.fourcc), fps, (w, h))
+                    vid_writer.write(im0)
+
+    if save_txt or save_img:
+        print('Results saved to %s' % os.getcwd() + os.sep + out)
+        if platform == 'darwin':  # MacOS
+            os.system('open ' + save_path)
+
+    print('Done. (%.3fs)' % (time.time() - t0))
+
 
     # Profile
     # img = torch.rand(8 if torch.cuda.is_available() else 1, 3, 640, 640).to(device)
