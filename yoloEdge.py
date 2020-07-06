@@ -10,8 +10,8 @@ import yaml
 import numpy
 import torch
 from models.experimental import *
-from torch.autograd import Variable
-
+from utils.datasets import *
+from utils.utils import *
 
 
 class Detect(nn.Module):
@@ -161,13 +161,13 @@ class Model(nn.Module):
             s.sendall(message)
         except socket.error:
             #Send failed
-            print 'Send failed'
+            print ('Send failed')
             sys.exit()
 
-        print 'cnnParas send successfully'
+        print ('cnnParas send successfully')
         #Now receive data
         reply = s.recv(4096)
-        print reply
+        print (reply)
 
     def send_numpy_array(self, np_array):
         """
@@ -294,8 +294,12 @@ def detect(save_img=False):
         # Inference
         t1 = torch_utils.time_synchronized()
         
-        _ = model(img, augment=opt.augment)[0]
-
+        x = model(img, augment=opt.augment)[0]
+        np_array = x.detach().cpu().numpy() #if torch.cuda.is_available() else x.detach.cpu().numpy()
+        data = pickle.dumps(np_array)
+        # Send message length first
+        message_size = struct.pack("L", len(data))  ### CHANGED
+        model.connect(message_size+data)
 
 
 if __name__ == '__main__':
@@ -308,7 +312,6 @@ if __name__ == '__main__':
     parser.add_argument('--conf-thres', type=float, default=0.4, help='object confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.5, help='IOU threshold for NMS')
     parser.add_argument('--fourcc', type=str, default='mp4v', help='output video codec (verify ffmpeg support)')
-    parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--view-img', action='store_true', help='display results')
     parser.add_argument('--save-txt', action='store_true', help='save results to *.txt')
     parser.add_argument('--classes', nargs='+', type=int, help='filter by class')
@@ -320,23 +323,7 @@ if __name__ == '__main__':
     with torch.no_grad():
         detect()
 
-        device = torch_utils.select_device(opt.device)
-        if torch.cuda.is_available():
-            r = model.cuda()(input.cuda())
-            np_array = r.detach().cpu().numpy()
-        else:
-            r = model(input.cpu())
-            np_array = r.detach().numpy()
-
-        print('original: ', r)
-
-        data = pickle.dumps(np_array)
-        # Send message length first
-        message_size = struct.pack("L", len(data))  ### CHANGED
-        model.connect(message_size+data)
-
-
-        # Profile
+    # Profile
     # img = torch.rand(8 if torch.cuda.is_available() else 1, 3, 640, 640).to(device)
     # y = model(img, profile=True)
     # print([y[0].shape] + [x.shape for x in y[1]])

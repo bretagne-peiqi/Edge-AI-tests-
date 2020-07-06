@@ -146,17 +146,17 @@ class Model(nn.Module):
                 m.forward = m.fuseforward  # update forward
         torch_utils.model_info(self)
 
-   def connect(self ):
+    def connect(self ):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             s.bind((HOST, PORT))
         except socket.error as msg:
-            print 'Bind failed. Error Code : ' + str(msg[0]) + ' Message ' + msg[1]
+            print ('Bind failed. Error Code : ' + str(msg[0]) + ' Message ' + msg[1])
             sys.exit()
 
         #Start listening on socket
         s.listen(10)
-        print 'Socket now listening'
+        print ('Socket now listening')
 
         conn, addr = s.accept()
         self.payload_size = struct.calcsize("L")  ### CHANGED
@@ -247,93 +247,107 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', type=str, default='weights/gwei2.pt', help='cloud weights.pt')
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    parser.add_argument('--source', type=str, default='inference/images', help='source')  # file/folder, 0 for webcam
+    parser.add_argument('--output', type=str, default='inference/output', help='output folder')  # output folder
+    parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')
+    parser.add_argument('--conf-thres', type=float, default=0.4, help='object confidence threshold')
+    parser.add_argument('--iou-thres', type=float, default=0.5, help='IOU threshold for NMS')
+    parser.add_argument('--fourcc', type=str, default='mp4v', help='output video codec (verify ffmpeg support)')
+    parser.add_argument('--view-img', action='store_true', help='display results')
+    parser.add_argument('--save-txt', action='store_true', help='save results to *.txt')
+    parser.add_argument('--classes', nargs='+', type=int, help='filter by class')
+    parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
+    parser.add_argument('--augment', action='store_true', help='augmented inference')
     opt = parser.parse_args()
-    opt.cfg = glob.glob('./**/' + opt.cfg, recursive=True)[0]  # find file
-    device = torch_utils.select_device(opt.device)
+    opt.img_size = check_img_size(opt.img_size)
 
-    # Create model
-    model = torch.load(weights, map_location=device)['model'].float()
-    cnnparas = model.connect()
-    img = torch.from_numpy(cnnparas)
+    with torch.no_grad():
 
-    pred = model(img, augment=opt.augment)[0]
-    # Apply Classifier
-    if classify:
-        pred = apply_classifier(pred, modelc, img, im0s)
+        weights = opt.weights
+        device = torch_utils.select_device(opt.device)
+        # Create model
+        model = torch.load(weights, map_location=device).float()
+        cnnparas = model.connect()
+        img = torch.from_numpy(cnnparas)
 
-    # Process detections
-    for i, det in enumerate(pred):  # detections per image
-        if webcam:  # batch_size >= 1
-            p, s, im0 = path[i], '%g: ' % i, im0s[i].copy()
-        else:
-            p, s, im0 = path, '', im0s
+        pred = model(img, augment=opt.augment)[0]
+        # Apply Classifier
+        if classify:
+            pred = apply_classifier(pred, modelc, img, im0s)
 
-        save_path = str(Path(out) / Path(p).name)
-        s += '%gx%g ' % img.shape[2:]  # print string
-        gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  #  normalization gain whwh
-        if det is not None and len(det):
-            # Rescale boxes from img_size to im0 size
-            det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
+        # Process detections
+        for i, det in enumerate(pred):  # detections per image
+            if webcam:  # batch_size >= 1
+                p, s, im0 = path[i], '%g: ' % i, im0s[i].copy()
+            else:
+                p, s, im0 = path, '', im0s
 
-            # Print results
-            for c in det[:, -1].unique():
-                n = (det[:, -1] == c).sum()  # detections per class
-                s += '%g %ss, ' % (n, names[int(c)])  # add to string
+            save_path = str(Path(out) / Path(p).name)
+            s += '%gx%g ' % img.shape[2:]  # print string
+            gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  #  normalization gain whwh
+            if det is not None and len(det):
+                # Rescale boxes from img_size to im0 size
+                det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
 
-            # Write results
-            for *xyxy, conf, cls in det:
-                if save_txt:  # Write to file
-                    xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                    with open(save_path[:save_path.rfind('.')] + '.txt', 'a') as file:
-                        file.write(('%g ' * 5 + '\n') % (cls, *xywh))  # label format
+                # Print results
+                for c in det[:, -1].unique():
+                    n = (det[:, -1] == c).sum()  # detections per class
+                    s += '%g %ss, ' % (n, names[int(c)])  # add to string
 
-                if save_img or view_img:  # Add bbox to image
-                    label = '%s %.2f' % (names[int(cls)], conf)
-                # Print time (inference + NMS)
-            print('%sDone. (%.3fs)' % (s, t2 - t1))
+                # Write results
+                for *xyxy, conf, cls in det:
+                    if save_txt:  # Write to file
+                        xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+                        with open(save_path[:save_path.rfind('.')] + '.txt', 'a') as file:
+                            file.write(('%g ' * 5 + '\n') % (cls, *xywh))  # label format
 
-            # Stream results
-            if view_img:
-                cv2.imshow(p, im0)
-                if cv2.waitKey(1) == ord('q'):  # q to quit
-                    raise StopIteration
+                    if save_img or view_img:  # Add bbox to image
+                        label = '%s %.2f' % (names[int(cls)], conf)
+                    # Print time (inference + NMS)
+                print('%sDone. (%.3fs)' % (s, t2 - t1))
 
-            # Save results (image with detections)
-            if save_img:
-                if dataset.mode == 'images':
-                    cv2.imwrite(save_path, im0)
-                else:
-                    if vid_path != save_path:  # new video
-                        vid_path = save_path
-                        if isinstance(vid_writer, cv2.VideoWriter):
-                            vid_writer.release()  # release previous video writer
+                # Stream results
+                if view_img:
+                    cv2.imshow(p, im0)
+                    if cv2.waitKey(1) == ord('q'):  # q to quit
+                        raise StopIteration
 
-                        fps = vid_cap.get(cv2.CAP_PROP_FPS)
-                        w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                        h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                        vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*opt.fourcc), fps, (w, h))
-                    vid_writer.write(im0)
+                # Save results (image with detections)
+                if save_img:
+                    if dataset.mode == 'images':
+                        cv2.imwrite(save_path, im0)
+                    else:
+                        if vid_path != save_path:  # new video
+                            vid_path = save_path
+                            if isinstance(vid_writer, cv2.VideoWriter):
+                                vid_writer.release()  # release previous video writer
 
-    if save_txt or save_img:
-        print('Results saved to %s' % os.getcwd() + os.sep + out)
-        if platform == 'darwin':  # MacOS
-            os.system('open ' + save_path)
+                            fps = vid_cap.get(cv2.CAP_PROP_FPS)
+                            w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                            h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                            vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*opt.fourcc), fps, (w, h))
+                        vid_writer.write(im0)
 
-    print('Done. (%.3fs)' % (time.time() - t0))
+        if save_txt or save_img:
+            print('Results saved to %s' % os.getcwd() + os.sep + out)
+            if platform == 'darwin':  # MacOS
+                os.system('open ' + save_path)
+
+        print('Done. (%.3fs)' % (time.time() - t0))
 
 
-    # Profile
-    # img = torch.rand(8 if torch.cuda.is_available() else 1, 3, 640, 640).to(device)
-    # y = model(img, profile=True)
-    # print([y[0].shape] + [x.shape for x in y[1]])
+        # Profile
+        # img = torch.rand(8 if torch.cuda.is_available() else 1, 3, 640, 640).to(device)
+        # y = model(img, profile=True)
+        # print([y[0].shape] + [x.shape for x in y[1]])
 
-    # ONNX export
-    # model.model[-1].export = True
-    # torch.onnx.export(model, img, f.replace('.yaml', '.onnx'), verbose=True, opset_version=11)
+        # ONNX export
+        # model.model[-1].export = True
+        # torch.onnx.export(model, img, f.replace('.yaml', '.onnx'), verbose=True, opset_version=11)
 
-    # Tensorboard
-    # from torch.utils.tensorboard import SummaryWriter
-    # tb_writer = SummaryWriter()
-    # print("Run 'tensorboard --logdir=models/runs' to view tensorboard at http://localhost:6006/")
-    # tb_writer.add_graph(model.model, img)  # add model to tensorboard
-    # tb_writer.add_image('test', img[0], dataformats='CWH')  # add model to tensorboard
+        # Tensorboard
+        # from torch.utils.tensorboard import SummaryWriter
+        # tb_writer = SummaryWriter()
+        # print("Run 'tensorboard --logdir=models/runs' to view tensorboard at http://localhost:6006/")
+        # tb_writer.add_graph(model.model, img)  # add model to tensorboard
+        # tb_writer.add_image('test', img[0], dataformats='CWH')  # add model to tensorboard
