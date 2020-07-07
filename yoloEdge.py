@@ -5,6 +5,7 @@ import sys
 import socket
 import pickle
 import struct
+import collections as co
 
 import yaml
 import numpy
@@ -13,6 +14,8 @@ from models.experimental import *
 from utils.datasets import *
 from utils.utils import *
 
+host = '10.0.105.51';
+port = 8888;
 
 class Detect(nn.Module):
     def __init__(self, nc=80, anchors=()):  # detection layer
@@ -45,7 +48,6 @@ class Detect(nn.Module):
                 y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
                 z.append(y.view(bs, -1, self.no))
 
-        print ('z is %v', z)
         return x if self.training else (torch.cat(z, 1), x)
 
     @staticmethod
@@ -55,7 +57,7 @@ class Detect(nn.Module):
 
 
 class Model(nn.Module):
-    def __init__(self, model_cfg='yolov5s.yaml', ch=64, nc=None):  # model, input channels, number of classes
+    def __init__(self, model_cfg='models/yolo5s1.yaml', ch=3, nc=None):  # model, input channels, number of classes
         super(Model, self).__init__()
         if type(model_cfg) is dict:
             self.md = model_cfg  # model dict
@@ -70,7 +72,7 @@ class Model(nn.Module):
         # print([x.shape for x in self.forward(torch.zeros(1, ch, 64, 64))])
 
         # Build strides, anchors
-        if self.model[-1] != None:
+        if self.model[-1] == None:
             m = self.model[-1]  # Detect()
             tx = self.forward(torch.zeros(1,ch,64,64))
             #print ('testing tx is ', tx)
@@ -80,7 +82,7 @@ class Model(nn.Module):
 
         # Init weights, biases
         torch_utils.initialize_weights(self)
-        self._initialize_biases()  # only run once
+        #self._initialize_biases()  # only run once
         torch_utils.model_info(self, True)
 
         new_weights_dict = co.OrderedDict()
@@ -88,24 +90,30 @@ class Model(nn.Module):
         Weights = opt.weights
         ckpt = torch.load(Weights)
 
+
         try:
             weights = {k: v for k, v in ckpt['model'].float().state_dict().items()
                      if int(k.split('.')[1]) < splitN }
 
-            for k, v in zip(model.state_dict().keys(), weights.values()):
+            for k, v in zip(self.model.state_dict().keys(), weights.values()):
                 new_weights_dict[k] = v
 
-            print ('before model is ', weights.values())
-            #print ('before model is ', model.state_dict().values())
-            model.load_state_dict(new_weights_dict, strict=True)
-            #print ('after model is ', model.state_dict().values())
-            #torch.save(model, savePath)
+            #print ('before model is ', weights.values())
+            #print ('before model is ', self.model.state_dict().values())
+            self.model.load_state_dict(new_weights_dict, strict=True)
+
+            #print ('after model is ', self.model.state_dict().values())
         except KeyError as e:
             s = "%s is not compatible with %s. Specify --weights '' or specify a --cfg compatible with %s." \
                  % (opt.models, opt.weights)
             raise KeyError(s) from e
 
         #self.model.load_state_dict("/home/edge/peiqi/distYolov5/weit.pt")
+        with open(opt.data) as f:
+            data_dict = yaml.load(f, Loader=yaml.FullLoader)  # model dict
+        
+        self.names = data_dict['names']
+        #print(self.names)
 
     def forward(self, x, augment=False, profile=False):
         if augment:
@@ -131,16 +139,18 @@ class Model(nn.Module):
         for m in self.model:
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
-
+            
+            #print('sizes are ',x.size())
             x = m(x)  # run
             y.append(x if m.i in self.save else None)  # save output
+            #print('sizes are ',x.size())
 
         #print ('y and dt are', (y, dt))
-        np_array = x.detach().numpy()
-        data = pickle.dumps(np_array)
-        # Send message length first
-        message_size = struct.pack("L", len(data))  ### CHANGED
-        self.connect(message_size+data)
+        #np_array = x.detach().numpy()
+        #data = pickle.dumps(np_array)
+        #Send message length first
+        #message_size = struct.pack("L", len(data))  ### CHANGED
+        #self.connect(message_size+data)
 
         return x
 
@@ -278,12 +288,16 @@ def detect(save_img=False):
         shutil.rmtree(out)  # delete output folder
     os.makedirs(out)  # make new output folder
     half = device.type != 'cpu'  # half precision only supported on CUDA
+    half = False
+    print('half ...', half)  # half precision only supported on CUDA
 
     # Load model
     #google_utils.attempt_download(weights)
-    model = torch.load(weights, map_location=device).float()  # load to FP32
+    #model = torch.load(weights, map_location=device).float()  # load to FP32
+    model = Model().float()
+    #print('model type ', type(model))
+    #print('model dir ', dir(model))
     #model = torch.load(weights, map_location=device)['model'].float()  # load to FP32
-    # torch.save(torch.load(weights, map_location=device), weights)  # update model if SourceChangeWarning
     # model.fuse()
     model.to(device).eval()
     if half:
@@ -315,8 +329,10 @@ def detect(save_img=False):
 
         # Inference
         t1 = torch_utils.time_synchronized()
-        
-        x = model(img, augment=opt.augment)[0]
+       
+        print ('img size is', img.size())
+        x = model(img, augment=opt.augment)#[0]
+        print ('peiqi testing x ', x.size())
         np_array = x.detach().cpu().numpy() #if torch.cuda.is_available() else x.detach.cpu().numpy()
         data = pickle.dumps(np_array)
         # Send message length first
@@ -341,6 +357,7 @@ if __name__ == '__main__':
     parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
     parser.add_argument('--augment', action='store_true', help='augmented inference')
     parser.add_argument('--splitN', default=3, help='split model segmentation from number N')
+    parser.add_argument('--data', type=str, default='data/coco128.yaml', help='*.data path')
     opt = parser.parse_args()
     opt.img_size = check_img_size(opt.img_size)
 

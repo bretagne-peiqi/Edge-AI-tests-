@@ -63,7 +63,7 @@ class Model(nn.Module):
         # print([x.shape for x in self.forward(torch.zeros(1, ch, 64, 64))])
 
         # Build strides, anchors
-        if self.model[-1] != None:
+        if self.model[-1] == None:
             m = self.model[-1]  # Detect()
             tx = self.forward(torch.zeros(1,ch,64,64))
             #print ('testing tx is ', tx)
@@ -73,7 +73,7 @@ class Model(nn.Module):
 
         # Init weights, biases
         torch_utils.initialize_weights(self)
-        self._initialize_biases()  # only run once
+        #self._initialize_biases()  # only run once
         torch_utils.model_info(self, True)
         #self.model.load_state_dict("/home/edge/peiqi/distYolov5/weit.pt")
         torch.save(self.model, "/home/edge/peiqi/distYolov5/models/wei2.pt")
@@ -203,7 +203,7 @@ def parse_model(md, ch):  # model_dict, input_channels(3)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cfg', type=str, default='yolo5s2.yaml', help='model.yaml')
+    parser.add_argument('--cfg', type=str, default='yolo5s1.yaml', help='model.yaml')
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     opt = parser.parse_args()
     opt.cfg = glob.glob('./**/' + opt.cfg, recursive=True)[0]  # find file

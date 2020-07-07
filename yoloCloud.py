@@ -5,6 +5,7 @@ import socket
 import sys
 import pickle
 import struct
+import collections as co
 
 import yaml
 from models.experimental import *
@@ -45,7 +46,7 @@ class Detect(nn.Module):
                 y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
                 z.append(y.view(bs, -1, self.no))
 
-        print ('z is %v', z)
+        #print ('z is %v', z)
         return x if self.training else (torch.cat(z, 1), x)
 
     @staticmethod
@@ -54,7 +55,7 @@ class Detect(nn.Module):
         return torch.stack((xv, yv), 2).view((1, 1, ny, nx, 2)).float()
 
 class Model(nn.Module):
-    def __init__(self, model_cfg='yolov5s.yaml', ch=64, nc=None):  # model, input channels, number of classes
+    def __init__(self, model_cfg='models/yolo5s2.yaml', ch=64, nc=None):  # model, input channels, number of classes
         super(Model, self).__init__()
         if type(model_cfg) is dict:
             self.md = model_cfg  # model dict
@@ -97,10 +98,10 @@ class Model(nn.Module):
             #   name = k[6:]
             #   new_weights_dict[name] = v
 
-            for k, v in zip(model.state_dict().keys(), weights.values()):
+            for k, v in zip(self.model.state_dict().keys(), weights.values()):
                 new_weights_dict[k] = v
 
-            print ('before model is ', weights.values())
+            #print ('before model is ', weights.values())
             #print ('before model is ', model.state_dict().values())
             self.model.load_state_dict(new_weights_dict, strict=True)
             #print ('after model is ', model.state_dict().values())
@@ -207,6 +208,88 @@ class Model(nn.Module):
         frame = pickle.loads(frame_data)
         return frame
 
+def detect():
+    out, source, weights, view_img, save_txt, imgsz = \
+    opt.output, opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size
+    webcam = source == '0' or source.startswith('rtsp') or source.startswith('http') or source.endswith('.txt')
+        
+    device = torch_utils.select_device(opt.device)
+    # Create model
+    # model = torch.load(weights, map_location=device).float()
+    model = Model()
+    cnnparas = model.connect()
+    img = torch.from_numpy(cnnparas)
+
+    print('received data ', img.size())
+    
+    predo = model(img, augment=opt.augment)
+    #print ('predo is ', predo)
+
+    pred = predo[0]
+
+    # Apply Classifier
+    #if classify:
+    #    pred = apply_classifier(pred, modelc, img, im0s)
+
+    # Process detections
+    for i, det in enumerate(pred):  # detections per image
+        if webcam:  # batch_size >= 1
+            p, s, im0 = path[i], '%g: ' % i, im0s[i].copy()
+        else:
+            p, s, im0 = path, '', im0s
+
+        save_path = str(Path(out) / Path(p).name)
+        s += '%gx%g ' % img.shape[2:]  # print string
+        gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  #  normalization gain whwh
+        if det is not None and len(det):
+            # Rescale boxes from img_size to im0 size
+            det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
+
+            # Print results
+            for c in det[:, -1].unique():
+                n = (det[:, -1] == c).sum()  # detections per class
+                s += '%g %ss, ' % (n, names[int(c)])  # add to string
+
+            # Write results
+            for *xyxy, conf, cls in det:
+                if save_txt:  # Write to file
+                    xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+                    with open(save_path[:save_path.rfind('.')] + '.txt', 'a') as file:
+                        file.write(('%g ' * 5 + '\n') % (cls, *xywh))  # label format
+
+                if save_img or view_img:  # Add bbox to image
+                    label = '%s %.2f' % (names[int(cls)], conf)
+                # Print time (inference + NMS)
+            print('%sDone. (%.3fs)' % (s, t2 - t1))
+
+            # Stream results
+            if view_img:
+                cv2.imshow(p, im0)
+                if cv2.waitKey(1) == ord('q'):  # q to quit
+                    raise StopIteration
+
+            # Save results (image with detections)
+            if save_img:
+                if dataset.mode == 'images':
+                    cv2.imwrite(save_path, im0)
+                else:
+                    if vid_path != save_path:  # new video
+                        vid_path = save_path
+                        if isinstance(vid_writer, cv2.VideoWriter):
+                            vid_writer.release()  # release previous video writer
+
+                        fps = vid_cap.get(cv2.CAP_PROP_FPS)
+                        w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                        h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                        vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*opt.fourcc), fps, (w, h))
+                    vid_writer.write(im0)
+
+    if save_txt or save_img:
+        print('Results saved to %s' % os.getcwd() + os.sep + out)
+        if platform == 'darwin':  # MacOS
+            os.system('open ' + save_path)
+
+    print('Done. (%.3fs)' % (time.time() - t0))
 
 
 def parse_model(md, ch):  # model_dict, input_channels(3)
@@ -292,78 +375,7 @@ if __name__ == '__main__':
 
     with torch.no_grad():
 
-        weights = opt.weights
-        device = torch_utils.select_device(opt.device)
-        # Create model
-        model = torch.load(weights, map_location=device).float()
-        cnnparas = model.connect()
-        img = torch.from_numpy(cnnparas)
-
-        pred = model(img, augment=opt.augment)[0]
-        # Apply Classifier
-        if classify:
-            pred = apply_classifier(pred, modelc, img, im0s)
-
-        # Process detections
-        for i, det in enumerate(pred):  # detections per image
-            if webcam:  # batch_size >= 1
-                p, s, im0 = path[i], '%g: ' % i, im0s[i].copy()
-            else:
-                p, s, im0 = path, '', im0s
-
-            save_path = str(Path(out) / Path(p).name)
-            s += '%gx%g ' % img.shape[2:]  # print string
-            gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  #  normalization gain whwh
-            if det is not None and len(det):
-                # Rescale boxes from img_size to im0 size
-                det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
-
-                # Print results
-                for c in det[:, -1].unique():
-                    n = (det[:, -1] == c).sum()  # detections per class
-                    s += '%g %ss, ' % (n, names[int(c)])  # add to string
-
-                # Write results
-                for *xyxy, conf, cls in det:
-                    if save_txt:  # Write to file
-                        xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                        with open(save_path[:save_path.rfind('.')] + '.txt', 'a') as file:
-                            file.write(('%g ' * 5 + '\n') % (cls, *xywh))  # label format
-
-                    if save_img or view_img:  # Add bbox to image
-                        label = '%s %.2f' % (names[int(cls)], conf)
-                    # Print time (inference + NMS)
-                print('%sDone. (%.3fs)' % (s, t2 - t1))
-
-                # Stream results
-                if view_img:
-                    cv2.imshow(p, im0)
-                    if cv2.waitKey(1) == ord('q'):  # q to quit
-                        raise StopIteration
-
-                # Save results (image with detections)
-                if save_img:
-                    if dataset.mode == 'images':
-                        cv2.imwrite(save_path, im0)
-                    else:
-                        if vid_path != save_path:  # new video
-                            vid_path = save_path
-                            if isinstance(vid_writer, cv2.VideoWriter):
-                                vid_writer.release()  # release previous video writer
-
-                            fps = vid_cap.get(cv2.CAP_PROP_FPS)
-                            w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                            h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                            vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*opt.fourcc), fps, (w, h))
-                        vid_writer.write(im0)
-
-        if save_txt or save_img:
-            print('Results saved to %s' % os.getcwd() + os.sep + out)
-            if platform == 'darwin':  # MacOS
-                os.system('open ' + save_path)
-
-        print('Done. (%.3fs)' % (time.time() - t0))
-
+        detect()
 
         # Profile
         # img = torch.rand(8 if torch.cuda.is_available() else 1, 3, 640, 640).to(device)

@@ -70,7 +70,7 @@ def ModelSplit():
         for k, v in zip(model.state_dict().keys(), weights.values()):
             new_weights_dict[k] = v
         
-        print ('before model is ', weights.values())
+        #print ('before model is ', weights.values())
         #print ('before model is ', model.state_dict().values())
         model.load_state_dict(new_weights_dict, strict=True)
         #print ('after model is ', model.state_dict().values())
