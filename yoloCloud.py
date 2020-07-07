@@ -70,13 +70,11 @@ class Model(nn.Module):
         # print([x.shape for x in self.forward(torch.zeros(1, ch, 64, 64))])
 
         # Build strides, anchors
-        if self.model[-1] != None:
-            m = self.model[-1]  # Detect()
-            tx = self.forward(torch.zeros(1,ch,64,64))
-            #print ('testing tx is ', tx)
-            m.stride = torch.tensor([64 / x.shape[-2] for x in tx])  # forward
-            m.anchors /= m.stride.view(-1, 1, 1)
-            self.stride = m.stride
+        m = self.model[-1]  # Detect()
+        tx = self.forward(torch.zeros(1,ch,64,64))
+        m.stride = torch.tensor([64 / x.shape[-2] for x in tx])  # forward
+        m.anchors /= m.stride.view(-1, 1, 1)
+        self.stride = m.stride
 
         # Init weights, biases
         torch_utils.initialize_weights(self)
@@ -139,6 +137,7 @@ class Model(nn.Module):
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
 
             x = m(x)  # run
+            #print ('m and it output size ', m, x.size())
             y.append(x if m.i in self.save else None)  # save output
 
         #print ('y and dt are', (y, dt))
@@ -174,123 +173,56 @@ class Model(nn.Module):
                 m.forward = m.fuseforward  # update forward
         torch_utils.model_info(self)
 
-    def connect(self ):
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        try:
-            s.bind((HOST, PORT))
-        except socket.error as msg:
-            print ('Bind failed. Error Code : ' + str(msg[0]) + ' Message ' + msg[1])
-            sys.exit()
+def connect():
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind((HOST, PORT))
+    except socket.error as msg:
+        print ('Bind failed. Error Code : ' + str(msg[0]) + ' Message ' + msg[1])
+        sys.exit()
 
-        #Start listening on socket
+
+    while True:
+    #Start listening on socket
         s.listen(10)
         print ('Socket now listening')
 
         conn, addr = s.accept()
-        self.payload_size = struct.calcsize("L")  ### CHANGED
-        self.data =b''
+        payload_size = struct.calcsize("L")  ### CHANGED
+        data =b''
 
-        while len(self.data) < self.payload_size:
-            self.data += conn.recv(4096)
+        while len(data) < payload_size:
+            data += conn.recv(4096)
 
-        packed_msg_size = self.data[:self.payload_size]
-        self.data = self.data[self.payload_size:]
+        packed_msg_size = data[:payload_size]
+        data = data[payload_size:]
         msg_size = struct.unpack("L", packed_msg_size)[0]
 
         # Retrieve all data based on message size
-        while len(self.data) < msg_size:
-            self.data += conn.recv(4096)
+        while len(data) < msg_size:
+            data += conn.recv(4096)
 
-        frame_data = self.data[:msg_size]
-        self.data = self.data[msg_size:]
+        frame_data = data[:msg_size]
+        data = data[msg_size:]
 
         # Extract frame
         frame = pickle.loads(frame_data)
-        return frame
 
-def detect():
-    out, source, weights, view_img, save_txt, imgsz = \
-    opt.output, opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size
-    webcam = source == '0' or source.startswith('rtsp') or source.startswith('http') or source.endswith('.txt')
         
-    device = torch_utils.select_device(opt.device)
-    # Create model
-    # model = torch.load(weights, map_location=device).float()
-    model = Model()
-    cnnparas = model.connect()
-    img = torch.from_numpy(cnnparas)
+        ##prepared for send
+        img = torch.from_numpy(frame)
+        model = Model()
 
-    print('received data ', img.size())
-    
-    predo = model(img, augment=opt.augment)
-    #print ('predo is ', predo)
+        print ('after 3 submodules,', img.size())
+        pred = model(img, augment=opt.augment)
+        predo = pred[0]
+        print('model_ret is ', pred.size())
 
-    pred = predo[0]
-
-    # Apply Classifier
-    #if classify:
-    #    pred = apply_classifier(pred, modelc, img, im0s)
-
-    # Process detections
-    for i, det in enumerate(pred):  # detections per image
-        if webcam:  # batch_size >= 1
-            p, s, im0 = path[i], '%g: ' % i, im0s[i].copy()
-        else:
-            p, s, im0 = path, '', im0s
-
-        save_path = str(Path(out) / Path(p).name)
-        s += '%gx%g ' % img.shape[2:]  # print string
-        gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  #  normalization gain whwh
-        if det is not None and len(det):
-            # Rescale boxes from img_size to im0 size
-            det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
-
-            # Print results
-            for c in det[:, -1].unique():
-                n = (det[:, -1] == c).sum()  # detections per class
-                s += '%g %ss, ' % (n, names[int(c)])  # add to string
-
-            # Write results
-            for *xyxy, conf, cls in det:
-                if save_txt:  # Write to file
-                    xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                    with open(save_path[:save_path.rfind('.')] + '.txt', 'a') as file:
-                        file.write(('%g ' * 5 + '\n') % (cls, *xywh))  # label format
-
-                if save_img or view_img:  # Add bbox to image
-                    label = '%s %.2f' % (names[int(cls)], conf)
-                # Print time (inference + NMS)
-            print('%sDone. (%.3fs)' % (s, t2 - t1))
-
-            # Stream results
-            if view_img:
-                cv2.imshow(p, im0)
-                if cv2.waitKey(1) == ord('q'):  # q to quit
-                    raise StopIteration
-
-            # Save results (image with detections)
-            if save_img:
-                if dataset.mode == 'images':
-                    cv2.imwrite(save_path, im0)
-                else:
-                    if vid_path != save_path:  # new video
-                        vid_path = save_path
-                        if isinstance(vid_writer, cv2.VideoWriter):
-                            vid_writer.release()  # release previous video writer
-
-                        fps = vid_cap.get(cv2.CAP_PROP_FPS)
-                        w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                        h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                        vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*opt.fourcc), fps, (w, h))
-                    vid_writer.write(im0)
-
-    if save_txt or save_img:
-        print('Results saved to %s' % os.getcwd() + os.sep + out)
-        if platform == 'darwin':  # MacOS
-            os.system('open ' + save_path)
-
-    print('Done. (%.3fs)' % (time.time() - t0))
-
+        np_array = predo.detach().cpu().numpy() #if torch.cuda.is_available() else x.detach.cpu().numpy()
+        data = pickle.dumps(np_array)
+        # Send message length first
+        message_size = struct.pack("L", len(data))  ### CHANGED
+        conn.sendall(message_size+data)
 
 def parse_model(md, ch):  # model_dict, input_channels(3)
     #print('\n%3s%15s%3s%10s  %-40s%-30s' % ('', 'from', 'n', 'params', 'module', 'arguments'))
@@ -375,7 +307,7 @@ if __name__ == '__main__':
 
     with torch.no_grad():
 
-        detect()
+        connect()
 
         # Profile
         # img = torch.rand(8 if torch.cuda.is_available() else 1, 3, 640, 640).to(device)

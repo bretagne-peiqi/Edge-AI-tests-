@@ -140,17 +140,9 @@ class Model(nn.Module):
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
             
-            #print('sizes are ',x.size())
             x = m(x)  # run
+            print ('m and it output size ', m, x.size())
             y.append(x if m.i in self.save else None)  # save output
-            #print('sizes are ',x.size())
-
-        #print ('y and dt are', (y, dt))
-        #np_array = x.detach().numpy()
-        #data = pickle.dumps(np_array)
-        #Send message length first
-        #message_size = struct.pack("L", len(data))  ### CHANGED
-        #self.connect(message_size+data)
 
         return x
 
@@ -196,10 +188,29 @@ class Model(nn.Module):
             print ('Send failed')
             sys.exit()
 
-        print ('cnnParas send successfully')
-        #Now receive data
-        reply = s.recv(4096)
-        print (reply)
+        print ('pre-representations send successfully')
+
+        ######################################## return
+        self.payload_size = struct.calcsize("L")  ### CHANGED
+        self.data =b''
+
+        while len(self.data) < self.payload_size:
+            self.data += s.recv(4096)
+
+        packed_msg_size = self.data[:self.payload_size]
+        self.data = self.data[self.payload_size:]
+        msg_size = struct.unpack("L", packed_msg_size)[0]
+
+        # Retrieve all data based on message size
+        while len(self.data) < msg_size:
+            self.data += s.recv(4096)
+
+        frame_data = self.data[:msg_size]
+        self.data = self.data[msg_size:]
+
+        # Extract frame
+        frame = pickle.loads(frame_data)
+        return frame
 
     def send_numpy_array(self, np_array):
         """
@@ -330,14 +341,89 @@ def detect(save_img=False):
         # Inference
         t1 = torch_utils.time_synchronized()
        
-        print ('img size is', img.size())
-        x = model(img, augment=opt.augment)#[0]
-        print ('peiqi testing x ', x.size())
+        x = model(img, augment=opt.augment)
+
         np_array = x.detach().cpu().numpy() #if torch.cuda.is_available() else x.detach.cpu().numpy()
         data = pickle.dumps(np_array)
         # Send message length first
         message_size = struct.pack("L", len(data))  ### CHANGED
-        model.connect(message_size+data)
+        ret_ndarray = model.connect(message_size+data)
+
+        ret_tensor = ret_ndarray
+        pred = torch.from_numpy(ret_ndarray)[0]
+
+        print ('final pred is ', pred.size())
+        pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres,
+                             fast=True, classes=opt.classes, agnostic=opt.agnostic_nms)
+        t2 = torch_utils.time_synchronized()
+
+
+        classify = False
+        # Apply Classifier
+        if classify:
+            pred = apply_classifier(pred, modelc, img, im0s)
+
+        # Process detections
+        for i, det in enumerate(pred):  # detections per image
+            if webcam:  # batch_size >= 1
+                p, s, im0 = path[i], '%g: ' % i, im0s[i].copy()
+            else:
+                p, s, im0 = path, '', im0s
+
+            save_path = str(Path(out) / Path(p).name)
+            s += '%gx%g ' % img.shape[2:]  # print string
+            gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  #  normalization gain whwh
+            if det is not None and len(det):
+                # Rescale boxes from img_size to im0 size
+                det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
+
+                # Print results
+                for c in det[:, -1].unique():
+                    n = (det[:, -1] == c).sum()  # detections per class
+                    s += '%g %ss, ' % (n, names[int(c)])  # add to string
+
+                # Write results
+                for *xyxy, conf, cls in det:
+                    if save_txt:  # Write to file
+                        xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+                        with open(save_path[:save_path.rfind('.')] + '.txt', 'a') as file:
+                            file.write(('%g ' * 5 + '\n') % (cls, *xywh))  # label format
+
+                    if save_img or view_img:  # Add bbox to image
+                        label = '%s %.2f' % (names[int(cls)], conf)
+                    # Print time (inference + NMS)
+                print('%sDone. (%.3fs)' % (s, t2 - t1))
+
+                # Stream results
+                if view_img:
+                    cv2.imshow(p, im0)
+                    if cv2.waitKey(1) == ord('q'):  # q to quit
+                        raise StopIteration
+
+                # Save results (image with detections)
+                if save_img:
+                    if dataset.mode == 'images':
+                        cv2.imwrite(save_path, im0)
+                        print("testing images!")
+                    else:
+                        if vid_path != save_path:  # new video
+                            vid_path = save_path
+                            if isinstance(vid_writer, cv2.VideoWriter):
+                                vid_writer.release()  # release previous video writer
+
+
+                            fps = vid_cap.get(cv2.CAP_PROP_FPS)
+                            w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                            h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                            vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*opt.fourcc), fps, (w, h))
+                        vid_writer.write(im0)
+
+        if save_txt or save_img:
+            print('Results saved to %s' % os.getcwd() + os.sep + out)
+            if platform == 'darwin':  # MacOS
+                os.system('open ' + save_path)
+
+        print('Done. (%.3fs)' % (time.time() - t0))
 
 
 if __name__ == '__main__':
