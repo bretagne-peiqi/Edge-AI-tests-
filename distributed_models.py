@@ -60,22 +60,23 @@ def ModelSplit():
 
     try:
         weights = {k: v for k, v in ckpt['model'].float().state_dict().items()
-                    if int(k.split('.')[1]) >= splitN }
+                    if int(k.split('.')[1]) > splitN }
 
         #model.state_dict().update(weights)
         #for k, v in weights.items():
         #   name = k[6:]
         #   new_weights_dict[name] = v
 
+        print ('before model is ', weights.values())
+
         for k, v in zip(model.state_dict().keys(), weights.values()):
             new_weights_dict[k] = v
         
-        #print ('before model is ', weights.values())
         #print ('before model is ', model.state_dict().values())
-        model.load_state_dict(new_weights_dict, strict=True)
+        #model.load_state_dict(new_weights_dict, strict=True)
         #print ('after model is ', model.state_dict().values())
         #savePath = opt.savePath+i+'.pt'
-        torch.save(model, savePath)
+        #torch.save(model, savePath)
     except KeyError as e:
         s = "%s is not compatible with %s. Specify --weights '' or specify a --cfg compatible with %s." \
             % (opt.models, opt.weights)

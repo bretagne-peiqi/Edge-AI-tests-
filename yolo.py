@@ -48,7 +48,7 @@ class Detect(nn.Module):
 
 
 class Model(nn.Module):
-    def __init__(self, model_cfg='yolov5s.yaml', ch=64, nc=None):  # model, input channels, number of classes
+    def __init__(self, model_cfg='yolov5s.yaml', ch=3, nc=None):  # model, input channels, number of classes
         super(Model, self).__init__()
         if type(model_cfg) is dict:
             self.md = model_cfg  # model dict
@@ -63,20 +63,17 @@ class Model(nn.Module):
         # print([x.shape for x in self.forward(torch.zeros(1, ch, 64, 64))])
 
         # Build strides, anchors
-        if self.model[-1] == None:
-            m = self.model[-1]  # Detect()
-            tx = self.forward(torch.zeros(1,ch,64,64))
-            #print ('testing tx is ', tx)
-            m.stride = torch.tensor([64 / x.shape[-2] for x in tx])  # forward
-            m.anchors /= m.stride.view(-1, 1, 1)
-            self.stride = m.stride
+        m = self.model[-1]  # Detect()
+        tx = self.forward(torch.zeros(1,ch,64,64))
+        #print ('testing tx is ', tx)
+        m.stride = torch.tensor([64 / x.shape[-2] for x in tx])  # forward
+        m.anchors /= m.stride.view(-1, 1, 1)
+        self.stride = m.stride
 
         # Init weights, biases
         torch_utils.initialize_weights(self)
-        #self._initialize_biases()  # only run once
+        self._initialize_biases()  # only run once
         torch_utils.model_info(self, True)
-        #self.model.load_state_dict("/home/edge/peiqi/distYolov5/weit.pt")
-        torch.save(self.model, "/home/edge/peiqi/distYolov5/models/wei2.pt")
 
     def forward(self, x, augment=False, profile=False):
         if augment:
@@ -106,7 +103,6 @@ class Model(nn.Module):
             x = m(x)  # run
             y.append(x if m.i in self.save else None)  # save output
 
-        #print ('y and dt are', (y, dt))
         return x
 
     def _initialize_biases(self, cf=None):  # initialize biases into Detect(), cf is class frequency
@@ -203,7 +199,7 @@ def parse_model(md, ch):  # model_dict, input_channels(3)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cfg', type=str, default='yolo5s1.yaml', help='model.yaml')
+    parser.add_argument('--cfg', type=str, default='yolov5s.yaml', help='model.yaml')
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     opt = parser.parse_args()
     opt.cfg = glob.glob('./**/' + opt.cfg, recursive=True)[0]  # find file

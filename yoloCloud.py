@@ -30,23 +30,38 @@ class Detect(nn.Module):
         self.export = False  # onnx export
 
     def forward(self, x):
+
         # x = x.copy()  # for profiling
         z = []  # inference output
+        print('before self.training is', self.training)
         self.training |= self.export
+        print('self.training is', self.training)
+        self.training = False
         for i in range(self.nl):
             bs, _, ny, nx = x[i].shape  # x(bs,255,20,20) to x(bs,3,20,20,85)
+            print('bs is ', bs)
             x[i] = x[i].view(bs, self.na, self.no, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
 
-            if not self.training:  # inference
+            if not self.training:
                 if self.grid[i].shape[2:4] != x[i].shape[2:4]:
                     self.grid[i] = self._make_grid(nx, ny).to(x[i].device)
 
                 y = x[i].sigmoid()
-                y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i].to(x[i].device)) * self.stride[i]  # xy
+                #print('self gride is ', self.grid[i])
+                #print('self stride is ', self.stride[i])
+                #y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i].to(x[i].device)) * self.stride[i]  # xy
+                y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i].to(x[i].device))   # xy
                 y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
+                print('y is ', y.size())
+                print('self.no is ', self.no)
                 z.append(y.view(bs, -1, self.no))
 
-        #print ('z is %v', z)
+
+        print ('z ele is ', type(z))
+        for i in z:
+            print ('z ele is ', i.size())
+        hh = torch.cat(z, 1)
+        print ('return for detect is ', hh.size())
         return x if self.training else (torch.cat(z, 1), x)
 
     @staticmethod
@@ -62,17 +77,40 @@ class Model(nn.Module):
         else:  # is *.yaml
             with open(model_cfg) as f:
                 self.md = yaml.load(f, Loader=yaml.FullLoader)  # model dict
-
         # Define model
         if nc:
             self.md['nc'] = nc  # override yaml value
         self.model, self.save = parse_model(self.md, ch=[ch])  # model, savelist, ch_out
         # print([x.shape for x in self.forward(torch.zeros(1, ch, 64, 64))])
 
+        new_weights_dict = co.OrderedDict()
+        splitN = opt.splitN
+        Weights = opt.weights
+        ckpt = torch.load(Weights)
+
+        try:
+            weights = {k: v for k, v in ckpt['model'].float().state_dict().items()
+                        if int(k.split('.')[1]) >= splitN }
+
+            for k, v in zip(self.model.state_dict().keys(), weights.values()):
+                new_weights_dict[k] = v
+
+            #print ('before model is ', model.state_dict().values())
+            self.model.load_state_dict(new_weights_dict, strict=True)
+            #print ('after model is ', model.state_dict().values())
+
+        except KeyError as e:
+            s = "%s is not compatible with %s. Specify --weights '' or specify a --cfg compatible with %s." \
+                % (opt.models, opt.weights)
+            raise KeyError(s) from e
+
         # Build strides, anchors
         m = self.model[-1]  # Detect()
-        tx = self.forward(torch.zeros(1,ch,64,64))
-        m.stride = torch.tensor([64 / x.shape[-2] for x in tx])  # forward
+        xi = self.forward(torch.zeros(1,ch,64,64))
+        for  x in xi:
+            print('x and its ele are ', len(x), x[0].size())
+        m.stride = torch.tensor([64 / x.shape[-2] for x in xi[1]])  # forward
+        print('m.stride in Model is ', m.stride)
         m.anchors /= m.stride.view(-1, 1, 1)
         self.stride = m.stride
 
@@ -80,36 +118,6 @@ class Model(nn.Module):
         torch_utils.initialize_weights(self)
         self._initialize_biases()  # only run once
         torch_utils.model_info(self, True)
-
-        new_weights_dict = co.OrderedDict()
-        splitN = opt.splitN
-        Weights = opt.weights
-        ckpt = torch.load(Weights)
-
-
-        try:
-            weights = {k: v for k, v in ckpt['model'].float().state_dict().items()
-                        if int(k.split('.')[1]) >= splitN }
-
-            #model.state_dict().update(weights)
-            #for k, v in weights.items():
-            #   name = k[6:]
-            #   new_weights_dict[name] = v
-
-            for k, v in zip(self.model.state_dict().keys(), weights.values()):
-                new_weights_dict[k] = v
-
-            #print ('before model is ', weights.values())
-            #print ('before model is ', model.state_dict().values())
-            self.model.load_state_dict(new_weights_dict, strict=True)
-            #print ('after model is ', model.state_dict().values())
-            #savePath = opt.savePath+i+'.pt'
-            #torch.save(model, savePath)
-        except KeyError as e:
-            s = "%s is not compatible with %s. Specify --weights '' or specify a --cfg compatible with %s." \
-                % (opt.models, opt.weights)
-            raise KeyError(s) from e
-
 
     def forward(self, x, augment=False, profile=False):
         if augment:
@@ -136,8 +144,14 @@ class Model(nn.Module):
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
 
+            if isinstance(m, Detect):
+                for i, xi in enumerate(x):
+                    print('detect ele is ', (i , xi.size()))
+            elif isinstance(m, Concat):
+                print ('input concat type and len is ', (type(x),len(x)) )
+            else:
+                print ('input size ',  x.size())
             x = m(x)  # run
-            #print ('m and it output size ', m, x.size())
             y.append(x if m.i in self.save else None)  # save output
 
         #print ('y and dt are', (y, dt))
@@ -207,16 +221,21 @@ def connect():
 
         # Extract frame
         frame = pickle.loads(frame_data)
-
         
         ##prepared for send
         img = torch.from_numpy(frame)
         model = Model()
 
-        print ('after 3 submodules,', img.size())
+        #print ('after 3 submodules,', img.size())
+        ## img.size is dims of 4
         pred = model(img, augment=opt.augment)
+        #for  p in pred[1]:
+            #for i, pi in enumerate(p):
+               # print ('testing pi is ', pi.size())
+
         predo = pred[0]
-        print('model_ret is ', pred.size())
+        #print('testing pi is ', predo.size())
+        #print('model_ret is ', predo.size())
 
         np_array = predo.detach().cpu().numpy() #if torch.cuda.is_available() else x.detach.cpu().numpy()
         data = pickle.dumps(np_array)
@@ -308,7 +327,6 @@ if __name__ == '__main__':
     with torch.no_grad():
 
         connect()
-
         # Profile
         # img = torch.rand(8 if torch.cuda.is_available() else 1, 3, 640, 640).to(device)
         # y = model(img, profile=True)

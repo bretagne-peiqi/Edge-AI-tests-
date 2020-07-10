@@ -72,9 +72,12 @@ class Model(nn.Module):
         # print([x.shape for x in self.forward(torch.zeros(1, ch, 64, 64))])
 
         # Build strides, anchors
-        if self.model[-1] == None:
+        if isinstance(self.model[-1], Detect):
             m = self.model[-1]  # Detect()
             tx = self.forward(torch.zeros(1,ch,64,64))
+            for x in tx:
+                for i in x:
+                    print('tell  me x is ', i.size())
             #print ('testing tx is ', tx)
             m.stride = torch.tensor([64 / x.shape[-2] for x in tx])  # forward
             m.anchors /= m.stride.view(-1, 1, 1)
@@ -89,7 +92,6 @@ class Model(nn.Module):
         splitN = opt.splitN
         Weights = opt.weights
         ckpt = torch.load(Weights)
-
 
         try:
             weights = {k: v for k, v in ckpt['model'].float().state_dict().items()
@@ -140,8 +142,12 @@ class Model(nn.Module):
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
             
+            #if isinstance(m, Bottleneck):
+            #    print('input are', x)
             x = m(x)  # run
-            print ('m and it output size ', m, x.size())
+            #if isinstance(m, Bottleneck):
+            #    print('output are', x)
+            
             y.append(x if m.i in self.save else None)  # save output
 
         return x
@@ -350,13 +356,14 @@ def detect(save_img=False):
         ret_ndarray = model.connect(message_size+data)
 
         ret_tensor = ret_ndarray
-        pred = torch.from_numpy(ret_ndarray)[0]
+        pred = torch.from_numpy(ret_ndarray)
 
         print ('final pred is ', pred.size())
+        print ('final pred is ', pred)
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres,
                              fast=True, classes=opt.classes, agnostic=opt.agnostic_nms)
         t2 = torch_utils.time_synchronized()
-
+        print ('after nms pred is ', len(pred))
 
         classify = False
         # Apply Classifier
@@ -373,6 +380,7 @@ def detect(save_img=False):
             save_path = str(Path(out) / Path(p).name)
             s += '%gx%g ' % img.shape[2:]  # print string
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  #  normalization gain whwh
+            print ('det in 1 circle is ', len(det))
             if det is not None and len(det):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
