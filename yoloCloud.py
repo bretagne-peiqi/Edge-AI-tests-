@@ -140,18 +140,22 @@ class Model(nn.Module):
 
     def forward_once(self, x, profile=True):
         y, dt = [], []  # outputs
+        flag = 1 
         for m in self.model:
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
 
-            if isinstance(m, Detect):
+            if isinstance(m, Conv) and flag == 1:
                 for i, xi in enumerate(x):
-                    print('detect ele is ', (i , xi.size()))
-            elif isinstance(m, Concat):
-                print ('input concat type and len is ', (type(x),len(x)) )
-            else:
-                print ('input size ',  x.size())
+                    print('conv input is ', (xi , xi.size()))
+
             x = m(x)  # run
+            if isinstance(m, Conv) and flag == 1:
+                for i, xi in enumerate(x):
+                    print('conv output is ', (xi , xi.size()))
+                flag = flag + 1
+            else:
+                print ('ingore ')
             y.append(x if m.i in self.save else None)  # save output
 
         #print ('y and dt are', (y, dt))
@@ -320,7 +324,7 @@ if __name__ == '__main__':
     parser.add_argument('--classes', nargs='+', type=int, help='filter by class')
     parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
     parser.add_argument('--augment', action='store_true', help='augmented inference')
-    parser.add_argument('--splitN', default=2, help='split model segmentation from number N')
+    parser.add_argument('--splitN', default=3, help='split model segmentation from number N')
     opt = parser.parse_args()
     opt.img_size = check_img_size(opt.img_size)
 
