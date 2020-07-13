@@ -106,7 +106,7 @@ class Model(nn.Module):
 
         # Build strides, anchors
         m = self.model[-1]  # Detect()
-        xi = self.forward(torch.zeros(1,ch,64,64))
+        xi = self.forward(torch.rand(1,ch,64,64))
         for  x in xi:
             print('x and its ele are ', len(x), x[0].size())
         m.stride = torch.tensor([64 / x.shape[-2] for x in xi[1]])  # forward
@@ -320,7 +320,7 @@ if __name__ == '__main__':
     parser.add_argument('--classes', nargs='+', type=int, help='filter by class')
     parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
     parser.add_argument('--augment', action='store_true', help='augmented inference')
-    parser.add_argument('--splitN', default=3, help='split model segmentation from number N')
+    parser.add_argument('--splitN', default=2, help='split model segmentation from number N')
     opt = parser.parse_args()
     opt.img_size = check_img_size(opt.img_size)
 
