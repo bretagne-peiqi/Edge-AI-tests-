@@ -49,8 +49,8 @@ class Detect(nn.Module):
                 y = x[i].sigmoid()
                 #print('self gride is ', self.grid[i])
                 #print('self stride is ', self.stride[i])
-                #y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i].to(x[i].device)) * self.stride[i]  # xy
-                y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i].to(x[i].device))   # xy
+                y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i].to(x[i].device)) * self.stride[i]  # xy
+                #y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i].to(x[i].device))   # xy
                 y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
                 #print('y is ', y.size())
                 #print('self.no is ', self.no)
@@ -61,7 +61,7 @@ class Detect(nn.Module):
         #for i in z:
         #    print ('z ele is ', i.size())
         hh = torch.cat(z, 1)
-        print ('return for detect is ', hh.size())
+        #print ('return for detect is ', hh.size())
         return x if self.training else (torch.cat(z, 1), x)
 
     @staticmethod
@@ -109,16 +109,17 @@ class Model(nn.Module):
 
         # Build strides, anchors
         m = self.model[-1]  # Detect()
-        xi = self.forward(torch.rand(1,ch,64,64))
+        #xi = self.forward(torch.rand(1,ch,64,64))
         #for  x in xi:
         #    print('x and its ele are ', len(x), x[0].size())
-        m.stride = torch.tensor([256 / x.shape[-2] for x in xi[1]])  # forward
+        #m.stride = torch.tensor([256 / x.shape[-2] for x in xi[1]])  # forward
+        m.stride = torch.tensor([8., 16., 32.])
         #print('m.stride in Model is ', m.stride)
         m.anchors /= m.stride.view(-1, 1, 1)
         self.stride = m.stride
 
         # Init weights, biases
-        torch_utils.initialize_weights(self)
+        #torch_utils.initialize_weights(self)
         #self._initialize_biases()  # only run once
         #torch_utils.model_info(self, True)
 
@@ -244,6 +245,12 @@ def connect():
         #for  p in pred[1]:
             #for i, pi in enumerate(p):
                # print ('testing pi is ', pi.size())
+
+        #for  p in pred[1]:
+                    #for i, pi in enumerate(p):
+                        #print ('testing pi is ', pi)
+
+        #print ('pred is ', pred[0])
 
         predo = pred[0]
         #print('testing pi is ', predo.size())

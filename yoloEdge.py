@@ -71,20 +71,8 @@ class Model(nn.Module):
         self.model, self.save = parse_model(self.md, ch=[ch])  # model, savelist, ch_out
         # print([x.shape for x in self.forward(torch.zeros(1, ch, 64, 64))])
 
-        # Build strides, anchors
-        if isinstance(self.model[-1], Detect):
-            m = self.model[-1]  # Detect()
-            tx = self.forward(torch.zeros(1,ch,64,64))
-            for x in tx:
-                for i in x:
-                    print('tell  me x is ', i.size())
-            #print ('testing tx is ', tx)
-            m.stride = torch.tensor([64 / x.shape[-2] for x in tx])  # forward
-            m.anchors /= m.stride.view(-1, 1, 1)
-            self.stride = m.stride
-
         # Init weights, biases
-        torch_utils.initialize_weights(self)
+        #torch_utils.initialize_weights(self)
         #self._initialize_biases()  # only run once
         #torch_utils.model_info(self, True)
 
@@ -366,11 +354,11 @@ def detect(save_img=False):
         ret_tensor = ret_ndarray
         pred = torch.from_numpy(ret_ndarray)
 
-        print ('final pred is ', pred)
+        #print ('final pred is ', pred)
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres,
                              fast=True, classes=opt.classes, agnostic=opt.agnostic_nms)
         t2 = torch_utils.time_synchronized()
-        print ('after nms pred is ', pred)
+        #print ('after nms pred is ', pred)
 
         classify = False
         # Apply Classifier
@@ -405,6 +393,7 @@ def detect(save_img=False):
 
                     if save_img or view_img:  # Add bbox to image
                         label = '%s %.2f' % (names[int(cls)], conf)
+                        plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=3)
                     # Print time (inference + NMS)
                 print('%sDone. (%.3fs)' % (s, t2 - t1))
 
@@ -423,7 +412,6 @@ def detect(save_img=False):
                             vid_path = save_path
                             if isinstance(vid_writer, cv2.VideoWriter):
                                 vid_writer.release()  # release previous video writer
-
 
                             fps = vid_cap.get(cv2.CAP_PROP_FPS)
                             w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
