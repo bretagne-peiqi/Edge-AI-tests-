@@ -339,7 +339,7 @@ if __name__ == '__main__':
     parser.add_argument('--classes', nargs='+', type=int, help='filter by class')
     parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
     parser.add_argument('--augment', action='store_true', help='augmented inference')
-    parser.add_argument('--splitN', default=3, help='split model segmentation from number N')
+    parser.add_argument('--splitN', type=int, default=3, help='split model segmentation from number N')
     opt = parser.parse_args()
     opt.img_size = check_img_size(opt.img_size)
 
