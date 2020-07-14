@@ -86,12 +86,18 @@ class Model(nn.Module):
         # Init weights, biases
         torch_utils.initialize_weights(self)
         #self._initialize_biases()  # only run once
-        torch_utils.model_info(self, True)
+        #torch_utils.model_info(self, True)
 
         new_weights_dict = co.OrderedDict()
         splitN = opt.splitN
         Weights = opt.weights
         ckpt = torch.load(Weights)
+
+        #k = ckpt['model'].float().state_dict().keys()
+        #print(' k is ', k)
+
+        #k2 = self.model.state_dict().keys()
+        #print (' k2 is ', k2)
 
         try:
             weights = {k: v for k, v in ckpt['model'].float().state_dict().items()
@@ -301,12 +307,12 @@ def detect(save_img=False):
 
     # Initialize
     device = torch_utils.select_device(opt.device)
+    #device = torch_utils.select_device(opt.device)
     if os.path.exists(out):
         shutil.rmtree(out)  # delete output folder
     os.makedirs(out)  # make new output folder
-    half = device.type != 'cpu'  # half precision only supported on CUDA
+    #half = device.type != 'cpu'  # half precision only supported on CUDA
     half = False
-    print('half ...', half)  # half precision only supported on CUDA
 
     # Load model
     #google_utils.attempt_download(weights)
@@ -317,6 +323,7 @@ def detect(save_img=False):
     #model = torch.load(weights, map_location=device)['model'].float()  # load to FP32
     # model.fuse()
     model.to(device).eval()
+
     if half:
         model.half()  # to FP16
 
@@ -349,7 +356,7 @@ def detect(save_img=False):
        
         x = model(img, augment=opt.augment)
 
-        print ('repre extractor is ', x, x.size())
+        #print ('repre extractor is ', x, x.size())
         np_array = x.detach().cpu().numpy() #if torch.cuda.is_available() else x.detach.cpu().numpy()
         data = pickle.dumps(np_array)
         # Send message length first
@@ -359,12 +366,11 @@ def detect(save_img=False):
         ret_tensor = ret_ndarray
         pred = torch.from_numpy(ret_ndarray)
 
-        print ('final pred is ', pred.size())
         print ('final pred is ', pred)
         pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres,
                              fast=True, classes=opt.classes, agnostic=opt.agnostic_nms)
         t2 = torch_utils.time_synchronized()
-        print ('after nms pred is ', len(pred))
+        print ('after nms pred is ', pred)
 
         classify = False
         # Apply Classifier
@@ -381,7 +387,6 @@ def detect(save_img=False):
             save_path = str(Path(out) / Path(p).name)
             s += '%gx%g ' % img.shape[2:]  # print string
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  #  normalization gain whwh
-            print ('det in 1 circle is ', len(det))
             if det is not None and len(det):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
@@ -413,7 +418,6 @@ def detect(save_img=False):
                 if save_img:
                     if dataset.mode == 'images':
                         cv2.imwrite(save_path, im0)
-                        print("testing images!")
                     else:
                         if vid_path != save_path:  # new video
                             vid_path = save_path

@@ -60,17 +60,28 @@ def ModelSplit():
 
     try:
         weights = {k: v for k, v in ckpt['model'].float().state_dict().items()
-                    if int(k.split('.')[1]) > splitN }
+                    if int(k.split('.')[1]) >= splitN }
+
+        print ('weights is ', len(weights.keys()))
+        print ('model.state_dict is ', len(model.state_dict().keys()))
+        c = 0
+        for i in weights.keys(): 
+            for j in model.state_dict().keys():
+                if 'model.'+ j == i:
+                    c = c + 1
+                    print (i, j)
+
+        print ('count ', c)
 
         #model.state_dict().update(weights)
         #for k, v in weights.items():
         #   name = k[6:]
         #   new_weights_dict[name] = v
 
-        print ('before model is ', weights.values())
-
         for k, v in zip(model.state_dict().keys(), weights.values()):
             new_weights_dict[k] = v
+
+    
         
         #print ('before model is ', model.state_dict().values())
         #model.load_state_dict(new_weights_dict, strict=True)
@@ -87,7 +98,7 @@ if __name__ == '__main__':
     parser.add_argument('--weights', type=str, nargs='+', action='append', default='weights/yolov5s.pt', help='pretrained model weights path')
     parser.add_argument('--models', type=str, nargs='+', action='append', default='models/wei2.pt', help='segmented model slices path')
     parser.add_argument('--savePath', type=str, default='weights/gwei2.pt', help='path to output segmented model slices')
-    parser.add_argument('--splitN', default=3, help='split model segmentation from number N')
+    parser.add_argument('--splitN', default=0, help='split model segmentation from number N')
     opt = parser.parse_args()
 
     with torch.no_grad():

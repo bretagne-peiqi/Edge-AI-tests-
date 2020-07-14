@@ -33,13 +33,13 @@ class Detect(nn.Module):
 
         # x = x.copy()  # for profiling
         z = []  # inference output
-        print('before self.training is', self.training)
+        #print('before self.training is', self.training)
         self.training |= self.export
-        print('self.training is', self.training)
+        #print('self.training is', self.training)
         self.training = False
         for i in range(self.nl):
             bs, _, ny, nx = x[i].shape  # x(bs,255,20,20) to x(bs,3,20,20,85)
-            print('bs is ', bs)
+            #print('bs is ', bs)
             x[i] = x[i].view(bs, self.na, self.no, ny, nx).permute(0, 1, 3, 4, 2).contiguous()
 
             if not self.training:
@@ -52,14 +52,14 @@ class Detect(nn.Module):
                 #y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i].to(x[i].device)) * self.stride[i]  # xy
                 y[..., 0:2] = (y[..., 0:2] * 2. - 0.5 + self.grid[i].to(x[i].device))   # xy
                 y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchor_grid[i]  # wh
-                print('y is ', y.size())
-                print('self.no is ', self.no)
+                #print('y is ', y.size())
+                #print('self.no is ', self.no)
                 z.append(y.view(bs, -1, self.no))
 
 
-        print ('z ele is ', type(z))
-        for i in z:
-            print ('z ele is ', i.size())
+        #print ('z ele is ', type(z))
+        #for i in z:
+        #    print ('z ele is ', i.size())
         hh = torch.cat(z, 1)
         print ('return for detect is ', hh.size())
         return x if self.training else (torch.cat(z, 1), x)
@@ -94,30 +94,33 @@ class Model(nn.Module):
 
             for k, v in zip(self.model.state_dict().keys(), weights.values()):
                 new_weights_dict[k] = v
+                #print (k, v)
 
-            #print ('before model is ', model.state_dict().values())
             self.model.load_state_dict(new_weights_dict, strict=True)
-            #print ('after model is ', model.state_dict().values())
+            #print ('after model is ', self.model.state_dict()['18.bias'])
 
         except KeyError as e:
             s = "%s is not compatible with %s. Specify --weights '' or specify a --cfg compatible with %s." \
                 % (opt.models, opt.weights)
             raise KeyError(s) from e
 
+        #a = weights['model.21.bias']
+        #print ('before model is ', a, b)
+
         # Build strides, anchors
         m = self.model[-1]  # Detect()
         xi = self.forward(torch.rand(1,ch,64,64))
-        for  x in xi:
-            print('x and its ele are ', len(x), x[0].size())
-        m.stride = torch.tensor([64 / x.shape[-2] for x in xi[1]])  # forward
-        print('m.stride in Model is ', m.stride)
+        #for  x in xi:
+        #    print('x and its ele are ', len(x), x[0].size())
+        m.stride = torch.tensor([256 / x.shape[-2] for x in xi[1]])  # forward
+        #print('m.stride in Model is ', m.stride)
         m.anchors /= m.stride.view(-1, 1, 1)
         self.stride = m.stride
 
         # Init weights, biases
         torch_utils.initialize_weights(self)
-        self._initialize_biases()  # only run once
-        torch_utils.model_info(self, True)
+        #self._initialize_biases()  # only run once
+        #torch_utils.model_info(self, True)
 
     def forward(self, x, augment=False, profile=False):
         if augment:
@@ -145,17 +148,21 @@ class Model(nn.Module):
             if m.f != -1:  # if not from previous layer
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
 
-            if isinstance(m, Conv) and flag == 1:
-                for i, xi in enumerate(x):
-                    print('conv input is ', (xi , xi.size()))
+            #if isinstance(m, nn.Conv2d):
+            #    flag = flag + 1 
+            #    if flag == 4:
+            #        for i, xi in enumerate(x):
+            #            print('conv2d input is ', (xi , xi.size()))
+            #            print('conv2d weights are ', m.state_dict().items())
 
             x = m(x)  # run
-            if isinstance(m, Conv) and flag == 1:
-                for i, xi in enumerate(x):
-                    print('conv output is ', (xi , xi.size()))
-                flag = flag + 1
-            else:
-                print ('ingore ')
+
+            #if isinstance(m, nn.Conv2d) and flag == 4:
+            #    for i, xi in enumerate(x):
+            #        print('conv output is ', (xi,  xi.size()))
+            #        flag = flag + 1
+            #else:
+            #    print ('ingore ')
             y.append(x if m.i in self.save else None)  # save output
 
         #print ('y and dt are', (y, dt))
@@ -199,7 +206,7 @@ def connect():
         print ('Bind failed. Error Code : ' + str(msg[0]) + ' Message ' + msg[1])
         sys.exit()
 
-
+    #device = torch_utils.select_device(opt.device)
     while True:
     #Start listening on socket
         s.listen(10)
@@ -229,6 +236,7 @@ def connect():
         ##prepared for send
         img = torch.from_numpy(frame)
         model = Model()
+        model.eval()
 
         #print ('after 3 submodules,', img.size())
         ## img.size is dims of 4
@@ -301,7 +309,7 @@ def parse_model(md, ch):  # model_dict, input_channels(3)
         t = str(m)[8:-2].replace('__main__.', '')  # module type
         np = sum([x.numel() for x in m_.parameters()])  # number params
         m_.i, m_.f, m_.type, m_.np = i, f, t, np  # attach index, 'from' index, type, number params
-        print('%3s%15s%3s%10.0f  %-40s%-30s' % (i, f, n, np, t, args))  # print
+        #print('%3s%15s%3s%10.0f  %-40s%-30s' % (i, f, n, np, t, args))  # print
         save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
         layers.append(m_)
         ch.append(c2)
