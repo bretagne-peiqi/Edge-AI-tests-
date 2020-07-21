@@ -70,37 +70,34 @@ def detect(save_img=False):
         t1 = torch_utils.time_synchronized()
         #print ('pppppshi testing', img.size())
 
-        for idx, m in enumerate(model.modules()):
-            if  idx == 215:
-                print('module size is ', m.state_dict().items())
+        #for idx, m in enumerate(model.modules()):
+        #    if  idx == 215:
+        #        print('module size is ', m.state_dict().items())
             #print('module is ', idx, m )
                 #print('Detect size is ', m.state_dict()['anchor_grid'].size())
                 #print ('detect stride is ', m.stride)
 
-        for name, layer in model.named_modules():
-            layer.register_forward_hook(get_activation(name))
+        #for name, layer in model.named_modules():
+        #    layer.register_forward_hook(get_activation(name))
         #for name, _ in model.named_modules():
          #   print ("name and layer are ", name)
 
         pred = model(img, augment=opt.augment)
-        i= 0
-        for key in activation:
+        #i= 0
+        #for key in activation:
             #if i < 245:
             #    i = i + 1
-            print('key and its output are', key , activation[key])
+            #print('key and its output are', key , activation[key])
             #else:
             #    break
 
         ### pred is a 3-dims tensor and ret_val of model is a tuple of pred
-        print('pred0 is ', pred[0].size())
-        for  p in pred[1]:
-            for i, pi in enumerate(p):
-                print ('testing pi is ', pi)
-
+        #print('pred0 is ', pred[0].size())
+        #for  p in pred[1]:
+        #    for i, pi in enumerate(p):
+        #       print ('testing pi is ', pi)
         pred = pred[0]
-
-        print ('pred is ', pred)
-
+        #print ('pred is ', pred)
         #print ('classes is ', opt.classes)
         #print ('agnotic_nms is ', opt.agnostic_nms)
 
@@ -124,7 +121,7 @@ def detect(save_img=False):
             save_path = str(Path(out) / Path(p).name)
             s += '%gx%g ' % img.shape[2:]  # print string
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  #  normalization gain whwh
-            print ('in 1 cycle pred is ', pred)
+            #print ('in 1 cycle pred is ', pred)
             if det is not None and len(det):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
@@ -180,7 +177,7 @@ def detect(save_img=False):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', type=str, default='weights/yolov5s.pt', help='model.pt path')
+    parser.add_argument('--weights', type=str, default='weights/yolov5m.pt', help='model.pt path')
     parser.add_argument('--source', type=str, default='inference/images', help='source')  # file/folder, 0 for webcam
     parser.add_argument('--output', type=str, default='inference/output', help='output folder')  # output folder
     parser.add_argument('--img-size', type=int, default=640, help='inference size (pixels)')

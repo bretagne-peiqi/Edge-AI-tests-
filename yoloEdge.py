@@ -104,12 +104,13 @@ class Model(nn.Module):
                  % (opt.models, opt.weights)
             raise KeyError(s) from e
 
-        #self.model.load_state_dict("/home/edge/peiqi/distYolov5/weit.pt")
+
         with open(opt.data) as f:
             data_dict = yaml.load(f, Loader=yaml.FullLoader)  # model dict
         
         self.names = data_dict['names']
         #print(self.names)
+        #torch.save(self.model, "/home/edge/peiqi/distYolov5/weit.pt")
 
     def forward(self, x, augment=False, profile=False):
         if augment:
@@ -176,56 +177,45 @@ class Model(nn.Module):
                 m.forward = m.fuseforward  # update forward
         torch_utils.model_info(self)
 
-    def connect(self, message):
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    def connect(self, data):
+        #s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         #Connect to remote server
-        s.connect((host , port))
-        try :
+        #s.connect((host , port))
+        #try :
             #Set the whole string
-            s.sendall(message)
-        except socket.error:
+        #    s.sendall(message)
+        #except socket.error:
             #Send failed
-            print ('Send failed')
-            sys.exit()
+        #    print ('Send failed')
+        #    sys.exit()
 
-        print ('pre-representations send successfully')
+        #print ('pre-representations send successfully')
 
         ######################################## return
-        self.payload_size = struct.calcsize("L")  ### CHANGED
-        self.data =b''
+        #self.payload_size = struct.calcsize("L")  ### CHANGED
+        #self.data =b''
+        
+        #i = 0
+        #while len(self.data) < self.payload_size:
+            #self.data += s.recv(409600)
+            #i = i + 1
 
-        while len(self.data) < self.payload_size:
-            self.data += s.recv(4096)
+        #print ('i is ', i)
 
-        packed_msg_size = self.data[:self.payload_size]
-        self.data = self.data[self.payload_size:]
+        packed_msg_size = data[:self.payload_size]
+        data = data[self.payload_size:]
         msg_size = struct.unpack("L", packed_msg_size)[0]
 
         # Retrieve all data based on message size
-        while len(self.data) < msg_size:
-            self.data += s.recv(4096)
+        while len(data) < msg_size:
+            data += s.recv(409600)
 
-        frame_data = self.data[:msg_size]
-        self.data = self.data[msg_size:]
+        frame_data = data[:msg_size]
+        data = data[msg_size:]
 
         # Extract frame
         frame = pickle.loads(frame_data)
         return frame
-
-    def send_numpy_array(self, np_array):
-        """
-        :param np_array: Numpy array to send to the listening socket
-        :type np_array: ndarray
-        :return: None
-        :rtype: None
-        """
-        data = pickle.dumps(np_array)
-
-        # Send message length first
-        message_size = struct.pack("L", len(data))  ### CHANGED
-
-        # Then data
-        self.socket.sendall(message_size + data)
 
 
 def parse_model(md, ch):  # model_dict, input_channels(3)
@@ -288,136 +278,171 @@ def parse_model(md, ch):  # model_dict, input_channels(3)
         ch.append(c2)
     return nn.Sequential(*layers), sorted(save)
 
-def detect(save_img=False):
-    out, source, weights, view_img, save_txt, imgsz = \
-        opt.output, opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size
-    webcam = source == '0' or source.startswith('rtsp') or source.startswith('http') or source.endswith('.txt')
 
-    # Initialize
-    device = torch_utils.select_device(opt.device)
-    #device = torch_utils.select_device(opt.device)
-    if os.path.exists(out):
-        shutil.rmtree(out)  # delete output folder
-    os.makedirs(out)  # make new output folder
-    #half = device.type != 'cpu'  # half precision only supported on CUDA
-    half = False
+class Mainner:
+    def __init__(self):
+        self.model = Model().float()
 
-    # Load model
-    #google_utils.attempt_download(weights)
-    #model = torch.load(weights, map_location=device).float()  # load to FP32
-    model = Model().float()
-    #print('model type ', type(model))
-    #print('model dir ', dir(model))
-    #model = torch.load(weights, map_location=device)['model'].float()  # load to FP32
-    # model.fuse()
-    model.to(device).eval()
+    def detect(self, save_img=False):
+        out, source, weights, view_img, save_txt, imgsz = \
+            opt.output, opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size
+        webcam = source == '0' or source.startswith('rtsp') or source.startswith('http') or source.endswith('.txt')
 
-    if half:
-        model.half()  # to FP16
+        # Initialize
+        device = torch_utils.select_device(opt.device)
+        #device = torch_utils.select_device(opt.device)
+        if os.path.exists(out):
+            shutil.rmtree(out)  # delete output folder
+        os.makedirs(out)  # make new output folder
+        #half = device.type != 'cpu'  # half precision only supported on CUDA
+        half = False
 
-    # Set Dataloader
-    vid_path, vid_writer = None, None
-    if webcam:
-        view_img = True
-        torch.backends.cudnn.benchmark = True  # set True to speed up constant image size inference
-        dataset = LoadStreams(source, img_size=imgsz)
-    else:
-        save_img = True
-        dataset = LoadImages(source, img_size=imgsz)
+        # Load model
+        #model = torch.load("/home/edge/peiqi/distYolov5/weit.pt", map_location=device).float()  # load to FP32
 
-    names = model.names if hasattr(model, 'names') else model.modules.names
-    colors = [[random.randint(0, 255) for _ in range(3)] for _ in range(len(names))]
+        #print('model dir ', dir(model))
+        #model = torch.load(weights, map_location=device)['model'].float()  # load to FP32
+        # model.fuse()
+        self.model.to(device).eval()
 
-    # Run inference
-    t0 = time.time()
-    img = torch.zeros((1, 3, imgsz, imgsz), device=device)  # init img
-    _ = model(img.half() if half else img) if device.type != 'cpu' else None  # run once
-    for path, img, im0s, vid_cap in dataset:
-        img = torch.from_numpy(img).to(device)
-        img = img.half() if half else img.float()  # uint8 to fp16/32
-        img /= 255.0  # 0 - 255 to 0.0 - 1.0
-        if img.ndimension() == 3:
-            img = img.unsqueeze(0)
+        #if half:
+        #    model.half()  # to FP16
 
-        # Inference
-        t1 = torch_utils.time_synchronized()
-       
-        x = model(img, augment=opt.augment)
+        # Set Dataloader
+        vid_path, vid_writer = None, None
+        if webcam:
+            view_img = True
+            torch.backends.cudnn.benchmark = True  # set True to speed up constant image size inference
+            dataset = LoadStreams(source, img_size=imgsz)
+        else:
+            save_img = True
+            dataset = LoadImages(source, img_size=imgsz)
 
-        #print ('repre extractor is ', x, x.size())
-        np_array = x.detach().cpu().numpy() #if torch.cuda.is_available() else x.detach.cpu().numpy()
-        data = pickle.dumps(np_array)
-        # Send message length first
-        message_size = struct.pack("L", len(data))  ### CHANGED
-        ret_ndarray = model.connect(message_size+data)
+        names = self.model.names if hasattr(self.model, 'names') else self.model.modules.names
+        colors = [[random.randint(0, 255) for _ in range(3)] for _ in range(len(names))]
 
-        ret_tensor = ret_ndarray
-        pred = torch.from_numpy(ret_ndarray)
+        # Run inference
+        t0 = time.time()
+        img = torch.zeros((1, 3, imgsz, imgsz), device=device)  # init img
+        _ = self.model(img.half() if half else img) if device.type != 'cpu' else None  # run once
 
-        #print ('final pred is ', pred)
-        pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres,
-                             fast=True, classes=opt.classes, agnostic=opt.agnostic_nms)
-        t2 = torch_utils.time_synchronized()
-        #print ('after nms pred is ', pred)
+        for path, img, im0s, vid_cap in dataset:
+            img = torch.from_numpy(img).to(device)
+            img = img.half() if half else img.float()  # uint8 to fp16/32
+            img /= 255.0  # 0 - 255 to 0.0 - 1.0
+            if img.ndimension() == 3:
+                img = img.unsqueeze(0)
 
-        classify = False
-        # Apply Classifier
-        if classify:
-            pred = apply_classifier(pred, modelc, img, im0s)
+            # Inference
+            t1 = torch_utils.time_synchronized()
+           
+            x = self.model(img, augment=opt.augment)
 
-        # Process detections
-        for i, det in enumerate(pred):  # detections per image
-            if webcam:  # batch_size >= 1
-                p, s, im0 = path[i], '%g: ' % i, im0s[i].copy()
-            else:
-                p, s, im0 = path, '', im0s
+            #print ('repre extractor is ', x, x.size())
+            np_array = x.detach().cpu().numpy() #if torch.cuda.is_available() else x.detach.cpu().numpy()
+            data = pickle.dumps(np_array)
+            # Send message length first
+            message_size = struct.pack("L", len(data))  ### CHANGED
+            self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            #Connect to remote server
+            self.s.connect((host , port))
 
-            save_path = str(Path(out) / Path(p).name)
-            s += '%gx%g ' % img.shape[2:]  # print string
-            gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  #  normalization gain whwh
-            if det is not None and len(det):
-                # Rescale boxes from img_size to im0 size
-                det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
+            #tb = time.time()
+            try :
+                self.s.sendall(message_size+data)
+            except socket.error:
+                print ('Send failed')
+                sys.exit()
 
-                # Print results
-                for c in det[:, -1].unique():
-                    n = (det[:, -1] == c).sum()  # detections per class
-                    s += '%g %ss, ' % (n, names[int(c)])  # add to string
+            print ('pre-representations send successfully')
+            payload_size = struct.calcsize("L")  ### CHANGED
+            data =b''
+            
+            while len(data) < payload_size:
+                data += self.s.recv(409600)
 
-                # Write results
-                for *xyxy, conf, cls in det:
-                    if save_txt:  # Write to file
-                        xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                        with open(save_path[:save_path.rfind('.')] + '.txt', 'a') as file:
-                            file.write(('%g ' * 5 + '\n') % (cls, *xywh))  # label format
+            packed_msg_size = data[:payload_size]
+            data = data[payload_size:]
+            msg_size = struct.unpack("L", packed_msg_size)[0]
 
-                    if save_img or view_img:  # Add bbox to image
-                        label = '%s %.2f' % (names[int(cls)], conf)
-                        plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=3)
-                    # Print time (inference + NMS)
-                print('%sDone. (%.3fs)' % (s, t2 - t1))
+            while len(data) < msg_size:
+                data += self.s.recv(409600)
 
-                # Stream results
-                if view_img:
-                    cv2.imshow(p, im0)
-                    if cv2.waitKey(1) == ord('q'):  # q to quit
-                        raise StopIteration
+            frame_data = data[:msg_size]
+            data = data[msg_size:]
 
-                # Save results (image with detections)
-                if save_img:
-                    if dataset.mode == 'images':
-                        cv2.imwrite(save_path, im0)
-                    else:
-                        if vid_path != save_path:  # new video
-                            vid_path = save_path
-                            if isinstance(vid_writer, cv2.VideoWriter):
-                                vid_writer.release()  # release previous video writer
+            # Extract frame
+            ret_ndarray = pickle.loads(frame_data)
+            #ret_ndarray = model.connect(data)
+            #ta = time.time()
+            #print('time spent for send and receive is (%.3fs)' % (ta-tb))
 
-                            fps = vid_cap.get(cv2.CAP_PROP_FPS)
-                            w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                            h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                            vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*opt.fourcc), fps, (w, h))
-                        vid_writer.write(im0)
+            #ret_tensor = ret_ndarray
+            pred = torch.from_numpy(ret_ndarray)
+            #print ('final pred is ', pred)
+            pred = non_max_suppression(pred, opt.conf_thres, opt.iou_thres,
+                                 fast=True, classes=opt.classes, agnostic=opt.agnostic_nms)
+            t2 = torch_utils.time_synchronized()
+            #print ('after nms pred is ', pred)
+
+            classify = False
+            # Apply Classifier
+            if classify:
+                pred = apply_classifier(pred, modelc, img, im0s)
+
+            # Process detections
+            for i, det in enumerate(pred):  # detections per image
+                if webcam:  # batch_size >= 1
+                    p, s, im0 = path[i], '%g: ' % i, im0s[i].copy()
+                else:
+                    p, s, im0 = path, '', im0s
+
+                save_path = str(Path(out) / Path(p).name)
+                s += '%gx%g ' % img.shape[2:]  # print string
+                gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  #  normalization gain whwh
+                if det is not None and len(det):
+                    # Rescale boxes from img_size to im0 size
+                    det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
+
+                    # Print results
+                    for c in det[:, -1].unique():
+                        n = (det[:, -1] == c).sum()  # detections per class
+                        s += '%g %ss, ' % (n, names[int(c)])  # add to string
+
+                    # Write results
+                    for *xyxy, conf, cls in det:
+                        if save_txt:  # Write to file
+                            xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+                            with open(save_path[:save_path.rfind('.')] + '.txt', 'a') as file:
+                                file.write(('%g ' * 5 + '\n') % (cls, *xywh))  # label format
+
+                        if save_img or view_img:  # Add bbox to image
+                            label = '%s %.2f' % (names[int(cls)], conf)
+                            plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=3)
+                        # Print time (inference + NMS)
+                    print('%sDone. (%.3fs)' % (s, t2 - t1))
+
+                    # Stream results
+                    if view_img:
+                        cv2.imshow(p, im0)
+                        if cv2.waitKey(1) == ord('q'):  # q to quit
+                            raise StopIteration
+
+                    # Save results (image with detections)
+                    if save_img:
+                        if dataset.mode == 'images':
+                            cv2.imwrite(save_path, im0)
+                        else:
+                            if vid_path != save_path:  # new video
+                                vid_path = save_path
+                                if isinstance(vid_writer, cv2.VideoWriter):
+                                    vid_writer.release()  # release previous video writer
+
+                                fps = vid_cap.get(cv2.CAP_PROP_FPS)
+                                w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                                h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                                vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*opt.fourcc), fps, (w, h))
+                            vid_writer.write(im0)
 
         if save_txt or save_img:
             print('Results saved to %s' % os.getcwd() + os.sep + out)
@@ -429,7 +454,7 @@ def detect(save_img=False):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', type=str, default='weights/yolov5s.pt', help='model.pt path')
+    parser.add_argument('--weights', type=str, default='weights/yolov5m.pt', help='model.pt path')
     parser.add_argument('--cfg', type=str, default='yolo5s1.yaml', help='model.yaml')
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--source', type=str, default='inference/images', help='source')  # file/folder, 0 for webcam
@@ -443,13 +468,14 @@ if __name__ == '__main__':
     parser.add_argument('--classes', nargs='+', type=int, help='filter by class')
     parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
     parser.add_argument('--augment', action='store_true', help='augmented inference')
-    parser.add_argument('--splitN', type=int, default=3, help='split model segmentation from number N')
+    parser.add_argument('--splitN', type=int, default=2, help='split model segmentation from number N')
     parser.add_argument('--data', type=str, default='data/coco128.yaml', help='*.data path')
     opt = parser.parse_args()
     opt.img_size = check_img_size(opt.img_size)
 
     with torch.no_grad():
-        detect()
+        trigger = Mainner()
+        trigger.detect()
 
     # Profile
     # img = torch.rand(8 if torch.cuda.is_available() else 1, 3, 640, 640).to(device)

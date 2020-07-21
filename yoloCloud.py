@@ -70,7 +70,7 @@ class Detect(nn.Module):
         return torch.stack((xv, yv), 2).view((1, 1, ny, nx, 2)).float()
 
 class Model(nn.Module):
-    def __init__(self, model_cfg='models/yolo5s2.yaml', ch=64, nc=None):  # model, input channels, number of classes
+    def __init__(self, model_cfg='models/yolo5s2.yaml', ch=96, nc=None):  # model, input channels, number of classes
         super(Model, self).__init__()
         if type(model_cfg) is dict:
             self.md = model_cfg  # model dict
@@ -117,7 +117,8 @@ class Model(nn.Module):
         #print('m.stride in Model is ', m.stride)
         m.anchors /= m.stride.view(-1, 1, 1)
         self.stride = m.stride
-
+        
+        #torch.save(self.model, "/home/edge/peiqi/distYolov5/weit2.pt")
         # Init weights, biases
         #torch_utils.initialize_weights(self)
         #self._initialize_biases()  # only run once
@@ -199,68 +200,73 @@ class Model(nn.Module):
                 m.forward = m.fuseforward  # update forward
         torch_utils.model_info(self)
 
-def connect():
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        s.bind((HOST, PORT))
-    except socket.error as msg:
-        print ('Bind failed. Error Code : ' + str(msg[0]) + ' Message ' + msg[1])
-        sys.exit()
+class Connector:
 
-    #device = torch_utils.select_device(opt.device)
-    while True:
-    #Start listening on socket
-        s.listen(10)
-        print ('Socket now listening')
+    def __init__(self):
+        self.model = Model()
+        self.model.eval()
+    def connect(self):
+        self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            self.s.bind((HOST, PORT))
+        except socket.error as msg:
+            print ('Bind failed. Error Code : ' + str(msg[0]) + ' Message ' + msg[1])
+            sys.exit()
 
-        conn, addr = s.accept()
-        payload_size = struct.calcsize("L")  ### CHANGED
-        data =b''
+        self.s.listen(10)
+        #device = torch_utils.select_device(opt.device)
+        while True:
+        #Start listening on socket
+            #print ('Socket now listening')
+            conn, addr = self.s.accept()
 
-        while len(data) < payload_size:
-            data += conn.recv(4096)
+            payload_size = struct.calcsize("L")  ### CHANGED
+            data =b''
 
-        packed_msg_size = data[:payload_size]
-        data = data[payload_size:]
-        msg_size = struct.unpack("L", packed_msg_size)[0]
+            while len(data) < payload_size:
+                data += conn.recv(409600)
 
-        # Retrieve all data based on message size
-        while len(data) < msg_size:
-            data += conn.recv(4096)
+            packed_msg_size = data[:payload_size]
+            data = data[payload_size:]
+            msg_size = struct.unpack("L", packed_msg_size)[0]
+            #i = 1
+            # Retrieve all data based on message size
+            while len(data) < msg_size:
+                data += conn.recv(819200)
+                #i = i + 1
+                
+            #volume = i*0.8
+            #print ('i is %s M' % volume)
 
-        frame_data = data[:msg_size]
-        data = data[msg_size:]
+            frame_data = data[:msg_size]
+            data = data[msg_size:]
 
-        # Extract frame
-        frame = pickle.loads(frame_data)
-        
-        ##prepared for send
-        img = torch.from_numpy(frame)
-        model = Model()
-        model.eval()
+            # Extract frame
+            frame = pickle.loads(frame_data)
+            
+            ##prepared for send
+            img = torch.from_numpy(frame)
 
-        #print ('after 3 submodules,', img.size())
-        ## img.size is dims of 4
-        pred = model(img, augment=opt.augment)
-        #for  p in pred[1]:
-            #for i, pi in enumerate(p):
-               # print ('testing pi is ', pi.size())
+            tb = time.time()
+            #model = torch.load("/home/edge/peiqi/distYolov5/weit2.pt").float()
+            #print ('after 3 submodules,', img.size())
+            ## img.size is dims of 4
+            pred = self.model(img, augment=opt.augment)
+            #for  p in pred[1]:
+                        #for i, pi in enumerate(p):
+                            #print ('testing pi is ', pi)
+            #print ('pred is ', pred[0])
+            #predo = pred[0]
 
-        #for  p in pred[1]:
-                    #for i, pi in enumerate(p):
-                        #print ('testing pi is ', pi)
-
-        #print ('pred is ', pred[0])
-
-        predo = pred[0]
-        #print('testing pi is ', predo.size())
-        #print('model_ret is ', predo.size())
-
-        np_array = predo.detach().cpu().numpy() #if torch.cuda.is_available() else x.detach.cpu().numpy()
-        data = pickle.dumps(np_array)
-        # Send message length first
-        message_size = struct.pack("L", len(data))  ### CHANGED
-        conn.sendall(message_size+data)
+            ta = time.time()
+            print('time spent for second layer inference is (%.3fs)' % (ta-tb))
+            #print('testing pi is ', predo.size())
+            #print('model_ret is ', predo.size())
+            np_array = pred[0].detach().cpu().numpy() #if torch.cuda.is_available() else x.detach.cpu().numpy()
+            data = pickle.dumps(np_array)
+            # Send message length first
+            message_size = struct.pack("L", len(data))  ### CHANGED
+            conn.sendall(message_size+data)
 
 def parse_model(md, ch):  # model_dict, input_channels(3)
     #print('\n%3s%15s%3s%10s  %-40s%-30s' % ('', 'from', 'n', 'params', 'module', 'arguments'))
@@ -325,7 +331,7 @@ def parse_model(md, ch):  # model_dict, input_channels(3)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', type=str, default='weights/yolov5s.pt', help='cloud weights.pt')
+    parser.add_argument('--weights', type=str, default='weights/yolov5m.pt', help='cloud weights.pt')
     parser.add_argument('--cfg', type=str, default='yolo5s2.yaml', help='model.yaml')
     parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--source', type=str, default='inference/images', help='source')  # file/folder, 0 for webcam
@@ -339,13 +345,14 @@ if __name__ == '__main__':
     parser.add_argument('--classes', nargs='+', type=int, help='filter by class')
     parser.add_argument('--agnostic-nms', action='store_true', help='class-agnostic NMS')
     parser.add_argument('--augment', action='store_true', help='augmented inference')
-    parser.add_argument('--splitN', type=int, default=3, help='split model segmentation from number N')
+    parser.add_argument('--splitN', type=int, default=2, help='split model segmentation from number N')
     opt = parser.parse_args()
     opt.img_size = check_img_size(opt.img_size)
 
     with torch.no_grad():
 
-        connect()
+        cnn = Connector()
+        cnn.connect()
         # Profile
         # img = torch.rand(8 if torch.cuda.is_available() else 1, 3, 640, 640).to(device)
         # y = model(img, profile=True)
